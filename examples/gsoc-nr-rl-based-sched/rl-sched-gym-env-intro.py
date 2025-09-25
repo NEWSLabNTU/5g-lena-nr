@@ -34,6 +34,7 @@ def main(args):
         "--enableOfdma": args.enableOfdma,
         "--enableLcLevelQos": args.enableLcLevelQos,
         "--ueLevelSchedulerType": "Ai",  # Type of scheduler being used in the simulation (here, AI-based)
+        "--enablePdcpDiscarding": args.enablePdcpDiscarding,
     }
 
     # Create the environment using ns3-gym integration
@@ -130,6 +131,11 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Whether to enable LC assignment based on QoS requirements in the simulation",
+    )
+    parser.add_argument(
+        "--enablePdcpDiscarding",
+        action="store_true",
+        help="Enable PDCP discarding",
     )
     # Step interval for logging in the gym environment
     parser.add_argument("--stepInterval", type=int, default=1000, help="Step interval for logging")

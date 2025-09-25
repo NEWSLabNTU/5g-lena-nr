@@ -50,6 +50,7 @@ endif()
 
 set(source_files
     ${eigen_sources}
+    ${opengym_sources}
     helper/beamforming-helper-base.cc
     helper/cc-bwp-helper.cc
     helper/file-scenario-helper.cc
@@ -243,6 +244,7 @@ set(source_files
 )
 
 set(header_files
+    ${opengym_headers}
     helper/beamforming-helper-base.h
     helper/cc-bwp-helper.h
     helper/file-scenario-helper.h

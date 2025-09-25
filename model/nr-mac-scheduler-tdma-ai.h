@@ -77,6 +77,46 @@ class NR_EXPORT NrMacSchedulerTdmaAi : public NrMacSchedulerTdmaQos
     GetUeCompareUlFn() const override;
 
     /**
+     * @brief Update DL metrics by calling NrMacSchedulerUeInfoQos::UpdateQosDlMetric
+     * @param ue UE to update
+     * @param assigned the amount of resources assigned
+     * @param totAssigned the total amount of resources assigned in the slot
+     */
+    void AssignedDlResources(const NrMacSchedulerNs3::UePtrAndBufferReq& ue,
+                             const FTResources& assigned,
+                             const FTResources& totAssigned) const override;
+
+    /**
+     * @brief Update DL metrics by calling NrMacSchedulerUeInfoQos::UpdateQosDlMetric
+     * @param ue UE to update (ue that didn't get any resources)
+     * @param notAssigned the amount of resources not assigned
+     * @param totAssigned the total amount of resources assigned in the slot
+     */
+    void NotAssignedDlResources(const NrMacSchedulerNs3::UePtrAndBufferReq& ue,
+                                const FTResources& notAssigned,
+                                const FTResources& totAssigned) const override;
+
+    /**
+     * @brief Update UL metrics by calling NrMacSchedulerUeInfoQos::UpdateQosUlMetric
+     * @param ue UE to update
+     * @param assigned the amount of resources assigned
+     * @param totAssigned the total amount of resources assigned in the slot
+     */
+    void AssignedUlResources(const NrMacSchedulerNs3::UePtrAndBufferReq& ue,
+                             const FTResources& assigned,
+                             const FTResources& totAssigned) const override;
+
+    /**
+     * @brief Update UL metrics by calling NrMacSchedulerUeInfoQos::UpdateQosUlMetric
+     * @param ue UE to update (ue that didn't get any resources)
+     * @param notAssigned the amount of resources not assigned
+     * @param totAssigned the total amount of resources assigned in the slot
+     */
+    void NotAssignedUlResources(const NrMacSchedulerNs3::UePtrAndBufferReq& ue,
+                                const FTResources& notAssigned,
+                                const FTResources& totAssigned) const override;
+
+    /**
      * @brief Set the notify callback function for downlink
      * @param notifyCb The callback function to be set
      */
@@ -94,7 +134,7 @@ class NR_EXPORT NrMacSchedulerTdmaAi : public NrMacSchedulerTdmaQos
      * requests
      * @return An Observation object representing the observations for all UEs
      */
-    std::vector<NrMacSchedulerUeInfoAi::LcObservation> GetUeObservationsDl(
+    std::vector<NrMacSchedulerUeInfoAi::UeObservation> GetUeObservationsDl(
         const std::vector<NrMacSchedulerNs3::UePtrAndBufferReq>& ueVector) const;
 
     /**
@@ -103,7 +143,7 @@ class NR_EXPORT NrMacSchedulerTdmaAi : public NrMacSchedulerTdmaQos
      * requests
      * @return An Observation object representing the observations for all UEs
      */
-    std::vector<NrMacSchedulerUeInfoAi::LcObservation> GetUeObservationsUl(
+    std::vector<NrMacSchedulerUeInfoAi::UeObservation> GetUeObservationsUl(
         const std::vector<NrMacSchedulerNs3::UePtrAndBufferReq>& ueVector) const;
 
     /**
@@ -160,7 +200,7 @@ class NR_EXPORT NrMacSchedulerTdmaAi : public NrMacSchedulerTdmaQos
      * containing pointers to active UEs and their corresponding buffer requests
      */
     void UpdateAllUeWeightsDl(
-        const NrMacSchedulerUeInfoAi::UeWeightsMap& ueWeights,
+        const NrMacSchedulerUeInfoAi::Weights& ueWeights,
         const std::vector<NrMacSchedulerNs3::UePtrAndBufferReq>& ueVector) const;
 
     /**
@@ -171,13 +211,14 @@ class NR_EXPORT NrMacSchedulerTdmaAi : public NrMacSchedulerTdmaQos
      * containing pointers to active UEs and their corresponding buffer requests
      */
     void UpdateAllUeWeightsUl(
-        const NrMacSchedulerUeInfoAi::UeWeightsMap& ueWeights,
+        const NrMacSchedulerUeInfoAi::Weights& ueWeights,
         const std::vector<NrMacSchedulerNs3::UePtrAndBufferReq>& ueVector) const;
 
   private:
     double m_alpha{0.0};                           //!< PF Fairness index
     NrMacSchedulerUeInfoAi::NotifyCb m_notifyCbDl; //!< Notify callback function for downlink
     NrMacSchedulerUeInfoAi::NotifyCb m_notifyCbUl; //!< Notify callback function for uplink
+    uint16_t m_numerology{0};                      //!< Numerology
 };
 
 } // namespace ns3

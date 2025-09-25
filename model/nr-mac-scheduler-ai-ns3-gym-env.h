@@ -51,7 +51,7 @@ class NR_EXPORT NrMacSchedulerAiNs3GymEnv : public OpenGymEnv
      * @param numFlows The number of flows in the environment
      * Initializes the Gym environment with the given number of flows.
      */
-    NrMacSchedulerAiNs3GymEnv(uint32_t numFlows);
+    NrMacSchedulerAiNs3GymEnv(uint32_t numUes);
 
     /**
      * @brief Destructor for NrMacSchedulerAiNs3GymEnv
@@ -161,16 +161,16 @@ class NR_EXPORT NrMacSchedulerAiNs3GymEnv : public OpenGymEnv
      * to update the weights for all UEs when the RL model sends back its actions.
      */
     void NotifyCurrentIteration(
-        const std::vector<NrMacSchedulerUeInfoAi::LcObservation>& observations,
+        const std::vector<NrMacSchedulerUeInfoAi::UeObservation>& observations,
         bool isGameOver,
         float reward,
         const std::string& extraInfo,
         const NrMacSchedulerUeInfoAi::UpdateAllUeWeightsFn& updateAllUeWeightsFn);
 
   private:
-    uint32_t m_numFlows; //!< The number of flows in the environment
-    bool m_gameOver;     //!< Whether the current game/episode is over
-    std::vector<NrMacSchedulerUeInfoAi::LcObservation> m_observation; //!< Current observation data
+    uint32_t m_numUes; //!< The number of UEs in the environment
+    bool m_gameOver;   //!< Whether the current game/episode is over
+    std::vector<NrMacSchedulerUeInfoAi::UeObservation> m_observation; //!< Current observation data
     float m_reward;                                                   //!< The current reward
     std::string m_extraInfo; //!< Additional information for logging or debugging
     NrMacSchedulerUeInfoAi::UpdateAllUeWeightsFn

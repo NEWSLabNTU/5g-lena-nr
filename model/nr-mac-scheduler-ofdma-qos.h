@@ -183,7 +183,6 @@ class NR_EXPORT NrMacSchedulerOfdmaQos : public NrMacSchedulerOfdmaRR
     void BeforeUlSched(const UePtrAndBufferReq& ue,
                        const FTResources& assignableInIteration) const override;
 
-  private:
     double m_timeWindow{
         99.0}; //!< Time window to calculate the throughput. Better to make it an attribute.
     double m_alpha{0.0}; //!< PF Fairness index

@@ -108,23 +108,26 @@ main(int argc, char* argv[])
     double bandwidth = 10e6;
     double totalTxPower = 43;
 
-    uint8_t enableOfdma = 0;
+    bool enableOfdma = false;
     std::string schedulerType = "Qos";
-    uint8_t enableQoSLcScheduler = 0;
+    bool enableQoSLcScheduler = false;
 
     uint8_t priorityTrafficScenario = 0; // default is saturation
 
     uint16_t mcsTable = 2;
 
+    bool enablePdcpDiscarding = false;
+    uint32_t discardTimerMs = 0;
+
     // Where we will store the output files.
     std::string simTag = "default";
     std::string outputDir = "./";
 
-#ifdef HAVE_OPENGYM
     // OpenGym parameters
+#ifdef HAVE_OPENGYM
     uint32_t openGymPort = 5555;
-    uint32_t simSeed = 0;
 #endif
+    uint32_t simSeed = 0;
 
     /*
      * From here, we instruct the ns3::CommandLine class of all the input parameters
@@ -162,17 +165,21 @@ main(int argc, char* argv[])
                  "If set to true, allocated bytes via UE-level scheduler are assigned to LCs based "
                  "on their QoS requirements. Default is Round-Robin (false)",
                  enableQoSLcScheduler);
+    cmd.AddValue("enablePdcpDiscarding",
+                 "Whether to enable PDCP TX discarding",
+                 enablePdcpDiscarding);
+    cmd.AddValue("discardTimerMs",
+                 "Discard timer value in milliseconds to use for all the flows",
+                 discardTimerMs);
 #ifdef HAVE_OPENGYM
     cmd.AddValue("openGymPort", "Port number to use for OpenGym interface", openGymPort);
-    cmd.AddValue("simSeed", "Seed for the simulation", simSeed);
 #endif
+    cmd.AddValue("simSeed", "Seed for the simulation", simSeed);
 
     cmd.Parse(argc, argv);
 
-#ifdef HAVE_OPENGYM
     RngSeedManager::SetSeed(1);
     RngSeedManager::SetRun(simSeed);
-#endif
 
     // enable logging or not
     if (logging)
@@ -184,6 +191,11 @@ main(int argc, char* argv[])
     }
 
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(999999999));
+    Config::SetDefault("ns3::NrRlcUm::EnablePdcpDiscarding", BooleanValue(enablePdcpDiscarding));
+    Config::SetDefault("ns3::NrRlcUm::DiscardTimerMs", UintegerValue(discardTimerMs));
+
+    std::cout << "Enable Ofdma: " << enableOfdma << std::endl;
+    std::cout << "Enable PDCP Discarding: " << enablePdcpDiscarding << std::endl;
 
     /*
      * Create the scenario. In our examples, we heavily use helpers that setup
@@ -269,8 +281,8 @@ main(int argc, char* argv[])
 #ifdef HAVE_OPENGYM
     // Setup the OpenGym interface
     Ptr<OpenGymInterface> openGymInterface = CreateObject<OpenGymInterface>(openGymPort);
-    Ptr<NrMacSchedulerAiNs3GymEnv> myGymEnv = CreateObject<NrMacSchedulerAiNs3GymEnv>(
-        ue1flowContainer.GetN() + ue2flowsContainer.GetN() * 2);
+    Ptr<NrMacSchedulerAiNs3GymEnv> myGymEnv =
+        CreateObject<NrMacSchedulerAiNs3GymEnv>(ueNum); // Create the custom Gym environment
     myGymEnv->SetOpenGymInterface(openGymInterface);
     if (schedulerType == "Ai")
     {
@@ -281,6 +293,12 @@ main(int argc, char* argv[])
         nrHelper->SetSchedulerAttribute(
             "ActiveDlAi",
             BooleanValue(true)); // Activate the AI model for the downlink
+        nrHelper->SetSchedulerAttribute(
+            "Numerology",
+            UintegerValue(numerology)); // Set the numerology for the AI scheduler
+        nrHelper->SetSchedulerAttribute(
+            "LastAvgTPutWeight",
+            DoubleValue(1000.0)); // Set the last average throughput weight for the AI scheduler
         std::cout << "AI scheduler is enabled" << std::endl;
     }
 #else

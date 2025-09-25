@@ -36,8 +36,13 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      * @param beamId BeamId of the UE
      * @param fn A function that tells how many RB per RBG
      */
-    NrMacSchedulerUeInfoAi(float alpha, uint16_t rnti, BeamId beamId, const GetRbPerRbgFn& fn)
-        : NrMacSchedulerUeInfoQos(alpha, rnti, beamId, fn)
+    NrMacSchedulerUeInfoAi(float alpha,
+                           uint16_t numerology,
+                           uint16_t rnti,
+                           BeamId beamId,
+                           const GetRbPerRbgFn& fn)
+        : NrMacSchedulerUeInfoQos(alpha, rnti, beamId, fn),
+          m_slotPeriod(Seconds(0.001 / std::pow(2, numerology)))
     {
     }
 
@@ -58,27 +63,30 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      */
     typedef std::unordered_map<uint8_t, Weights> UeWeightsMap;
 
-    /**
+    /***
      * @struct LcObservation
      * @brief A struct for an observation of a flow
      *
      * A struct for an observation of a flow that stores the RNTI, LCG ID, LC ID, 5QI, priority, and
      * head-of-line delay of the flow.
      */
-    struct NR_EXPORT LcObservation
+    struct NR_EXPORT UeObservation
     {
         uint16_t rnti;
+        uint8_t numLcs;
         uint8_t lcId;
         uint8_t fiveQi;
         uint8_t priority;
         uint16_t holDelay;
+        uint32_t assignedBytes;
+        float avgTput;
     };
 
     /**
      * @typedef UpdateAllUeWeightsFn
      * @brief A function type for updating the weights of all UEs.
      */
-    typedef std::function<void(const UeWeightsMap&)> UpdateAllUeWeightsFn;
+    typedef std::function<void(const Weights&)> UpdateAllUeWeightsFn;
     /**
      * @typedef NotifyCb
      * @brief A callback type for notifying with specific parameters.
@@ -91,7 +99,7 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      * - A pointer to a const NrMacSchedulerOfdmaAi instance
      */
     typedef Callback<void,
-                     const std::vector<LcObservation>&,
+                     const std::vector<UeObservation>&,
                      bool,
                      float,
                      const std::string&,
@@ -106,7 +114,7 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      */
     void ResetDlSchedInfo() override
     {
-        m_weightsDl.clear();
+        m_weightDl = 0.0;
         NrMacSchedulerUeInfoQos::ResetDlSchedInfo();
     }
 
@@ -118,9 +126,27 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      */
     void ResetUlSchedInfo() override
     {
-        m_weightsUl.clear();
+        m_weightUl = 0.0;
         NrMacSchedulerUeInfoQos::ResetUlSchedInfo();
     }
+
+    /**
+     * @brief Update the QoS metric for downlink
+     * @param totAssigned the resources assigned
+     * @param timeWindow the time window
+     */
+    void UpdateDlAiMetric(bool isAssigned,
+                          const NrMacSchedulerNs3::FTResources& totAssigned,
+                          double timeWindow);
+
+    /**
+     * @brief Update the QoS metric for uplink
+     * @param totAssigned the resources assigned
+     * @param timeWindow the time window
+     */
+    void UpdateUlAiMetric(bool isAssigned,
+                          const NrMacSchedulerNs3::FTResources& totAssigned,
+                          double timeWindow);
 
     /**
      * @brief Get the current observation for downlink
@@ -131,7 +157,7 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      * The observation is stored in a vector of LcObservation and each consists of the RNTI,
      * LCG ID, LC ID, 5QI, priority, and head-of-line delay of the flow.
      */
-    std::vector<LcObservation> GetDlObservation();
+    UeObservation GetDlObservation();
 
     /**
      * @brief Get the current observation for uplink
@@ -142,7 +168,7 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      * The observation is stored in a vector of LcObservation and each consists of the RNTI,
      * LCG ID, LC ID, 5QI, priority, and head-of-line delay of the flow.
      */
-    std::vector<LcObservation> GetUlObservation();
+    UeObservation GetUlObservation();
 
     /**
      * @brief Update the weights for downlink
@@ -153,7 +179,7 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      * and the weight of the lcId is the value. The higher the weight, the
      * higher the priority of the flow in scheduling.
      */
-    void UpdateDlWeights(Weights& weights);
+    void UpdateDlWeight(double weight);
 
     /**
      * @brief Update the weights for uplink
@@ -164,7 +190,7 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
      * and lcId is the key, and the weight of the lcId is the value. The higher the weight, the
      * higher the priority of the flow in scheduling.
      */
-    void UpdateUlWeights(Weights& weights);
+    void UpdateUlWeight(double weight);
 
     /**
      * @brief Get the reward for downlink
@@ -211,39 +237,10 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
     static bool CompareUeWeightsDl(const NrMacSchedulerNs3::UePtrAndBufferReq& lue,
                                    const NrMacSchedulerNs3::UePtrAndBufferReq& rue)
     {
-        double lAiMetric = CalculateDlWeight(lue);
-        double rAiMetric = CalculateDlWeight(rue);
+        auto lUePtr = dynamic_cast<NrMacSchedulerUeInfoAi*>(lue.first.get());
+        auto rUePtr = dynamic_cast<NrMacSchedulerUeInfoAi*>(rue.first.get());
 
-        return (lAiMetric > rAiMetric);
-    }
-
-    /**
-     * @brief Calculate the weight of a UE in the downlink
-     * @param ue the UE
-     * @return the weight of the UE
-     *
-     * Calculate the weight of a UE in the downlink by iterating over the active LCs of the UE.
-     * The weight is calculated as the sum of the weights of the active LCs.
-     * The weight of an LC is retrieved from the m_weightsDl map.
-     */
-    static double CalculateDlWeight(const NrMacSchedulerNs3::UePtrAndBufferReq& ue)
-    {
-        double weight = 0;
-        auto uePtr = dynamic_cast<NrMacSchedulerUeInfoAi*>(ue.first.get());
-
-        for (const auto& ueLcg : ue.first->m_dlLCG)
-        {
-            std::vector<uint8_t> ueActiveLCs = ueLcg.second->GetActiveLCIds();
-
-            for (const auto lcId : ueActiveLCs)
-            {
-                auto it = uePtr->m_weightsDl.find(lcId);
-
-                NS_ASSERT_MSG(it != uePtr->m_weightsDl.end(), "Weight not found for LC " << lcId);
-                weight += it->second;
-            }
-        }
-        return weight;
+        return lUePtr->m_weightDl > rUePtr->m_weightDl;
     }
 
     /**
@@ -259,43 +256,20 @@ class NR_EXPORT NrMacSchedulerUeInfoAi : public NrMacSchedulerUeInfoQos
     static bool CompareUeWeightsUl(const NrMacSchedulerNs3::UePtrAndBufferReq& lue,
                                    const NrMacSchedulerNs3::UePtrAndBufferReq& rue)
     {
-        double lAiMetric = CalculateUlWeight(lue);
-        double rAiMetric = CalculateUlWeight(rue);
+        auto lUePtr = dynamic_cast<NrMacSchedulerUeInfoAi*>(lue.first.get());
+        auto rUePtr = dynamic_cast<NrMacSchedulerUeInfoAi*>(rue.first.get());
 
-        return (lAiMetric > rAiMetric);
+        return lUePtr->m_weightUl > rUePtr->m_weightUl;
     }
 
-    /**
-     * @brief Calculate the weight of a UE in the uplink
-     * @param ue the UE
-     * @return the weight of the UE
-     *
-     * Calculate the weight of a UE in the uplink by iterating over the active LCs of the UE.
-     * The weight is calculated as the sum of the weights of the active LCs.
-     * The weight of an LC is retrieved from the m_weightsUl map.
-     */
-    static double CalculateUlWeight(const NrMacSchedulerNs3::UePtrAndBufferReq& ue)
-    {
-        double weight = 0;
-        auto uePtr = dynamic_cast<NrMacSchedulerUeInfoAi*>(ue.first.get());
-
-        for (const auto& ueLcg : ue.first->m_ulLCG)
-        {
-            std::vector<uint8_t> ueActiveLCs = ueLcg.second->GetActiveLCIds();
-
-            for (const auto lcId : ueActiveLCs)
-            {
-                auto it = uePtr->m_weightsUl.find(lcId);
-
-                NS_ASSERT_MSG(it != uePtr->m_weightsUl.end(), "Weight not found for LC " << lcId);
-                weight += it->second;
-            }
-        }
-        return weight;
-    }
-
-    Weights m_weightsDl; //!< Weights assigned to each flow for a UE in the downlink
-    Weights m_weightsUl; //!< Weights assigned to each flow for a UE in the uplink
+  private:
+    uint8_t m_selectedLcResTypeDl; //!< The selected LC resource type in the downlink
+    uint8_t m_selectedLcResTypeUl; //!< The selected LC resource type in the uplink
+    double m_weightDl;             //!< The weight of the UE in the downlink
+    double m_weightUl;             //!< The weight of the UE in the uplink
+    bool m_selectedDl; //!< A boolean value indicating whether the UE is selected in the downlink
+    bool m_selectedUl; //!< A boolean value indicating whether the UE is selected in the uplink
+    Time m_slotPeriod; //!< The slot period
 };
 
 } // namespace ns3

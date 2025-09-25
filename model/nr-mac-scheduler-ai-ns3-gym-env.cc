@@ -17,10 +17,10 @@ NrMacSchedulerAiNs3GymEnv::NrMacSchedulerAiNs3GymEnv()
     NS_LOG_FUNCTION(this);
 }
 
-NrMacSchedulerAiNs3GymEnv::NrMacSchedulerAiNs3GymEnv(uint32_t numFlows)
+NrMacSchedulerAiNs3GymEnv::NrMacSchedulerAiNs3GymEnv(uint32_t numUes)
 {
     NS_LOG_FUNCTION(this);
-    m_numFlows = numFlows;
+    m_numUes = numUes;
 }
 
 NrMacSchedulerAiNs3GymEnv::~NrMacSchedulerAiNs3GymEnv()
@@ -48,8 +48,8 @@ NrMacSchedulerAiNs3GymEnv::GetActionSpace()
 {
     NS_LOG_FUNCTION(this);
     float low = 0.0;
-    float high = m_numFlows;
-    std::vector<uint32_t> shape = {m_numFlows};
+    float high = 1.0;
+    std::vector<uint32_t> shape = {m_numUes};
     std::string dtype = TypeNameGet<float>();
     return Create<OpenGymBoxSpace>(low, high, shape, dtype);
 }
@@ -59,12 +59,12 @@ NrMacSchedulerAiNs3GymEnv::GetObservationSpace()
 {
     NS_LOG_FUNCTION(this);
     float low = 0.0;
-    float high = 100.0;
+    float high = 1000.0;
     std::vector<uint32_t> shape = {
-        m_numFlows,
+        m_numUes,
         4,
     };
-    std::string dtype = TypeNameGet<uint16_t>();
+    std::string dtype = TypeNameGet<float>();
     return Create<OpenGymBoxSpace>(low, high, shape, dtype);
 }
 
@@ -80,17 +80,16 @@ NrMacSchedulerAiNs3GymEnv::GetObservation()
 {
     NS_LOG_FUNCTION(this);
     std::vector<uint32_t> shape = {
-        m_numFlows,
+        m_numUes,
         4,
     };
-    Ptr<OpenGymBoxContainer<uint16_t>> observation =
-        CreateObject<OpenGymBoxContainer<uint16_t>>(shape);
+    Ptr<OpenGymBoxContainer<float>> observation = CreateObject<OpenGymBoxContainer<float>>(shape);
     for (auto& obs : m_observation)
     {
         observation->AddValue(obs.rnti);
-        observation->AddValue(obs.lcId);
         observation->AddValue(obs.priority);
         observation->AddValue(obs.holDelay);
+        observation->AddValue(obs.avgTput);
     }
     return observation;
 }
@@ -115,22 +114,20 @@ NrMacSchedulerAiNs3GymEnv::ExecuteActions(Ptr<OpenGymDataContainer> action)
     NS_LOG_FUNCTION(this);
     Ptr<OpenGymBoxContainer<float>> actionBox = DynamicCast<OpenGymBoxContainer<float>>(action);
     std::vector<float> actionData = actionBox->GetData();
-    NrMacSchedulerUeInfoAi::UeWeightsMap ueWeightsMap;
-    for (uint32_t i = 0; i < m_numFlows; i++)
+    NrMacSchedulerUeInfoAi::Weights weights;
+
+    for (uint32_t i = 0; i < m_numUes; i++)
     {
-        if (ueWeightsMap.end() == ueWeightsMap.find(m_observation[i].rnti))
-        {
-            ueWeightsMap[m_observation[i].rnti] = NrMacSchedulerUeInfoAi::Weights();
-        }
-        ueWeightsMap[m_observation[i].rnti][m_observation[i].lcId] = actionData[i];
+        weights[m_observation[i].rnti] = actionData[i];
     }
-    m_updateAllUeWeightsFn(ueWeightsMap);
+
+    m_updateAllUeWeightsFn(weights);
     return true;
 }
 
 void
 NrMacSchedulerAiNs3GymEnv::NotifyCurrentIteration(
-    const std::vector<NrMacSchedulerUeInfoAi::LcObservation>& observations,
+    const std::vector<NrMacSchedulerUeInfoAi::UeObservation>& observations,
     bool isGameOver,
     float reward,
     const std::string& extraInfo,

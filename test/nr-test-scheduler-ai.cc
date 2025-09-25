@@ -188,7 +188,7 @@ class NrTestSchedulerAiCase : public TestCase
     {
     }
 
-    void Notify(const std::vector<NrMacSchedulerUeInfoAi::LcObservation>& observation,
+    void Notify(const std::vector<NrMacSchedulerUeInfoAi::UeObservation>& observation,
                 bool isGameOver,
                 float reward,
                 const std::string& extraInfo,
@@ -209,7 +209,7 @@ class NrTestSchedulerAiCase : public TestCase
 };
 
 void
-NrTestSchedulerAiCase::Notify(const std::vector<NrMacSchedulerUeInfoAi::LcObservation>& observation,
+NrTestSchedulerAiCase::Notify(const std::vector<NrMacSchedulerUeInfoAi::UeObservation>& observation,
                               bool isGameOver,
                               float reward,
                               const std::string& extraInfo,
@@ -226,7 +226,7 @@ NrTestSchedulerAiCase::Notify(const std::vector<NrMacSchedulerUeInfoAi::LcObserv
         std::cout << "extraInfo: " << extraInfo << std::endl;
         std::cout << "observation size: " << observation.size() << std::endl;
     }
-    NrMacSchedulerUeInfoAi::UeWeightsMap ueWeightsMap;
+    NrMacSchedulerUeInfoAi::Weights weights;
     for (auto& obs : observation)
     {
         if (m_verbose)
@@ -248,11 +248,11 @@ NrTestSchedulerAiCase::Notify(const std::vector<NrMacSchedulerUeInfoAi::LcObserv
         NS_TEST_ASSERT_MSG_EQ(it->second.GetPacketDelayBudgetMs(),
                               obs.holDelay,
                               "Packet delay budget should be equal");
-        ueWeightsMap[obs.rnti] = NrMacSchedulerUeInfoAi::Weights{{obs.lcId, 1.0}};
+        weights[obs.rnti] = 1.0;
     }
     NS_TEST_ASSERT_MSG_EQ(isGameOver, false, "Game should not be over");
     NS_TEST_ASSERT_MSG_EQ(reward, 0.0, "Reward should be 0.0");
-    updateWeightsFn(ueWeightsMap);
+    updateWeightsFn(weights);
 }
 
 Ptr<NrMacSchedulerNs3>
