@@ -11,6 +11,7 @@
 #include "ns3/enum.h"
 #include "ns3/multi-model-spectrum-channel.h"
 #include "ns3/nr-csi-rs-filter.h"
+#include "ns3/nr-link-filter.h"
 #include "ns3/nyu-propagation-loss-model.h"
 #include "ns3/nyu-spectrum-propagation-loss-model.h"
 #include "ns3/object-factory.h"
@@ -23,6 +24,7 @@
 #include "ns3/three-gpp-v2v-channel-condition-model.h"
 #include "ns3/three-gpp-v2v-propagation-loss-model.h"
 #include "ns3/two-ray-spectrum-propagation-loss-model.h"
+#include "ns3/uinteger.h"
 
 namespace ns3
 {
@@ -95,7 +97,20 @@ NrChannelHelper::GetTypeId()
                                 NrChannelHelper::ChannelModel::TwoRay,
                                 "TwoRay",
                                 NrChannelHelper::ChannelModel::SionnaRT,
-                                "SionnaRT"));
+                                "SionnaRT"))
+            .AddAttribute(
+                "AddFilters",
+                "This attribute adds filters to the created spectrum channels, avoiding channel "
+                "computation for undesired links and reducing computational overhead."
+                "Filters must be specified as a bitmask:"
+                "Filter::CSIRS | Filter::SIDELINK | (...)"
+                "For details about the available filters and their implementation, refer to "
+                "nr-csi-rs-filter.h and nr-link-filter.h."
+                "This attribute must be set BEFORE creating the spectrum channels.",
+                UintegerValue(
+                    Filter::CSIRS), // TODO configure whether to install or not this filter
+                MakeUintegerAccessor(&NrChannelHelper::m_filter),
+                MakeUintegerChecker<uint8_t>());
     return tid;
 }
 
@@ -159,8 +174,7 @@ NrChannelHelper::CreateChannel(uint8_t flags)
         NS_LOG_DEBUG("Path loss model: " << pathLoss->GetInstanceTypeId().GetName());
         channel->AddPropagationLossModel(pathLoss);
     }
-    // TODO configure whether to install or not this filter
-    AddNrCsiRsFilter(channel);
+    AddFilters(channel);
     return channel;
 }
 
@@ -395,28 +409,40 @@ NrChannelHelper::AssignChannelsToBands(
 }
 
 void
-NrChannelHelper::AddNrCsiRsFilter(Ptr<SpectrumChannel> channel)
+NrChannelHelper::AddFilters(Ptr<SpectrumChannel> channel) const
 {
     Ptr<const SpectrumTransmitFilter> p = channel->GetSpectrumTransmitFilter();
-    bool found = false;
-    while (p && !found)
+    bool foundCsiRs = false;
+    bool foundSidelink = false;
+    while (p)
     {
-        if (DynamicCast<const NrCsiRsFilter>(p))
+        if (!foundCsiRs && (m_filter & Filter::CSIRS) && DynamicCast<const NrCsiRsFilter>(p))
         {
+            foundCsiRs = true;
             NS_LOG_DEBUG("Found existing NrCsiRsFilter for spectrum channel " << channel);
-            found = true;
         }
-        else
+        if (!foundSidelink && (m_filter & Filter::SIDELINK) && DynamicCast<const NrLinkFilter>(p))
         {
-            NS_LOG_DEBUG("Found different SpectrumTransmitFilter for channel " << channel);
-            p = p->GetNext();
+            foundSidelink = true;
+            NS_LOG_DEBUG("Found existing NrLinkFilter for spectrum channel " << channel);
         }
+        if (foundCsiRs && foundSidelink)
+        {
+            break;
+        }
+        p = p->GetNext();
     }
-    if (!found)
+    if ((m_filter & Filter::CSIRS) && !foundCsiRs)
     {
         Ptr<NrCsiRsFilter> pCsiRsFilter = CreateObject<NrCsiRsFilter>();
         channel->AddSpectrumTransmitFilter(pCsiRsFilter);
         NS_LOG_DEBUG("Adding NrCsiRsFilter to channel " << channel);
+    }
+    if ((m_filter & Filter::SIDELINK) && !foundSidelink)
+    {
+        Ptr<NrLinkFilter> nrLinkFilter = CreateObject<NrLinkFilter>();
+        channel->AddSpectrumTransmitFilter(nrLinkFilter);
+        NS_LOG_DEBUG("Adding sidelink filter to channel " << channel);
     }
 }
 

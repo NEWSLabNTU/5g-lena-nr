@@ -100,6 +100,7 @@ set(source_files
     model/nr-control-messages.cc
     model/nr-csi-rs-filter.cc
     model/nr-device-registry.cc
+    model/nr-link-filter.cc
     model/nr-eesm-cc-t1.cc
     model/nr-eesm-cc-t2.cc
     model/nr-eesm-cc.cc
@@ -295,6 +296,7 @@ set(header_files
     model/nr-control-messages.h
     model/nr-csi-rs-filter.h
     model/nr-device-registry.h
+    model/nr-link-filter.h
     model/nr-eesm-cc-t1.h
     model/nr-eesm-cc-t2.h
     model/nr-eesm-cc.h

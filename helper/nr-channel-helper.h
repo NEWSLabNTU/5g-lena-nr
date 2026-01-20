@@ -58,6 +58,14 @@ class NR_EXPORT NrChannelHelper : public Object
     };
 
     /**
+     * Filter parameters to avoid channel calculation for undesired links.     */
+    enum Filter : uint8_t
+    {
+        CSIRS = 0x01,    //!< Install CSIRS filter; see explanation in nr-csi-rs-filter.h
+        SIDELINK = 0x02, //!< Install ue-ue/gnb-gnb link filter; see explanation in nr-link-filter.h
+    } m_filter{Filter::CSIRS};
+
+    /**
      * @brief Default constructor
      */
     NrChannelHelper() = default;
@@ -277,10 +285,11 @@ class NR_EXPORT NrChannelHelper : public Object
     std::pair<TypeId, TypeId> GetPropagationTypeId() const;
 
     /**
-     * Install NrCsiRsFilter onto the specified spectrum channel
+     * Install filters on the specified spectrum channel, based on the previous
+     * configuration of m_filters.
      * @param channel the spectrum channel instance on which will be installed the filter
      */
-    void AddNrCsiRsFilter(Ptr<SpectrumChannel> channel);
+    void AddFilters(Ptr<SpectrumChannel> channel) const;
 
     ObjectFactory m_pathLossModel;         //!< The path loss object factory
     ObjectFactory m_spectrumModel;         //!< The phased spectrum object factory
