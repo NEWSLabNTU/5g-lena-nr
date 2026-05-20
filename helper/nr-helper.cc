@@ -45,6 +45,9 @@
 #include "ns3/nr-ue-phy.h"
 #include "ns3/nr-ue-rrc.h"
 #include "ns3/nr-wraparound-utils.h"
+#include "ns3/nyu-channel-model.h"
+#include "ns3/nyu-propagation-loss-model.h"
+#include "ns3/nyu-spectrum-propagation-loss-model.h"
 #include "ns3/pointer.h"
 #include "ns3/spectrum-channel.h"
 #include "ns3/three-gpp-channel-model.h"
@@ -52,6 +55,7 @@
 #include "ns3/three-gpp-spectrum-propagation-loss-model.h"
 #include "ns3/three-gpp-v2v-channel-condition-model.h"
 #include "ns3/three-gpp-v2v-propagation-loss-model.h"
+#include "ns3/two-ray-spectrum-propagation-loss-model.h"
 #include "ns3/uniform-planar-array.h"
 
 #include <algorithm>
@@ -1639,28 +1643,33 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
 {
     int64_t initialStream = currentStream;
 
-    Ptr<ThreeGppPropagationLossModel> propagationLossModel =
-        DynamicCast<ThreeGppPropagationLossModel>(
-            phy->GetSpectrumChannel()->GetPropagationLossModel());
-    if (!propagationLossModel)
-    {
-        // Non-3GPP channel configurations, such as Sionna RT, may not install a scalar
-        // PropagationLossModel. There are no 3GPP channel stream objects to assign on this path.
-        return currentStream - initialStream;
-    }
-
-    if (std::find(m_channelObjectsWithAssignedStreams.begin(),
+    auto propagationLossModel = phy->GetSpectrumChannel()->GetPropagationLossModel();
+    Ptr<ChannelConditionModel> channelConditionModel;
+    if (propagationLossModel &&
+        std::find(m_channelObjectsWithAssignedStreams.begin(),
                   m_channelObjectsWithAssignedStreams.end(),
                   propagationLossModel) == m_channelObjectsWithAssignedStreams.end())
     {
+        auto prop3gppModel = DynamicCast<ThreeGppPropagationLossModel>(propagationLossModel);
+        auto propNyuModel = DynamicCast<NYUPropagationLossModel>(propagationLossModel);
+        if (prop3gppModel)
+        {
+            channelConditionModel = prop3gppModel->GetChannelConditionModel();
+        }
+        else if (propNyuModel)
+        {
+            channelConditionModel = propNyuModel->GetChannelConditionModel();
+        }
+        else
+        {
+            channelConditionModel = nullptr;
+        }
         currentStream += propagationLossModel->AssignStreams(currentStream);
         m_channelObjectsWithAssignedStreams.emplace_back(propagationLossModel);
     }
 
-    Ptr<ChannelConditionModel> channelConditionModel =
-        propagationLossModel->GetChannelConditionModel();
-
-    if (std::find(m_channelObjectsWithAssignedStreams.begin(),
+    if (channelConditionModel &&
+        std::find(m_channelObjectsWithAssignedStreams.begin(),
                   m_channelObjectsWithAssignedStreams.end(),
                   channelConditionModel) == m_channelObjectsWithAssignedStreams.end())
     {
@@ -1668,9 +1677,8 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
         m_channelObjectsWithAssignedStreams.emplace_back(channelConditionModel);
     }
 
-    Ptr<ThreeGppSpectrumPropagationLossModel> spectrumLossModel =
-        DynamicCast<ThreeGppSpectrumPropagationLossModel>(
-            phy->GetSpectrumChannel()->GetPhasedArraySpectrumPropagationLossModel());
+    auto spectrumLossModel =
+        phy->GetSpectrumChannel()->GetPhasedArraySpectrumPropagationLossModel();
 
     if (spectrumLossModel)
     {
@@ -1678,9 +1686,25 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
                       m_channelObjectsWithAssignedStreams.end(),
                       spectrumLossModel) == m_channelObjectsWithAssignedStreams.end())
         {
-            Ptr<ThreeGppChannelModel> channel =
-                DynamicCast<ThreeGppChannelModel>(spectrumLossModel->GetChannelModel());
-            currentStream += channel->AssignStreams(currentStream);
+            auto tgppSpecModel =
+                DynamicCast<ThreeGppSpectrumPropagationLossModel>(spectrumLossModel);
+            auto nyuSpecModel = DynamicCast<NYUSpectrumPropagationLossModel>(spectrumLossModel);
+            auto twoRaySpectrumModel =
+                DynamicCast<TwoRaySpectrumPropagationLossModel>(spectrumLossModel);
+            if (twoRaySpectrumModel)
+            {
+                currentStream += twoRaySpectrumModel->AssignStreams(currentStream);
+            }
+            else if (tgppSpecModel)
+            {
+                currentStream += StaticCast<ThreeGppChannelModel>(tgppSpecModel->GetChannelModel())
+                                     ->AssignStreams(currentStream);
+            }
+            else if (nyuSpecModel)
+            {
+                currentStream += StaticCast<NYUChannelModel>(nyuSpecModel->GetChannelModel())
+                                     ->AssignStreams(currentStream);
+            }
             m_channelObjectsWithAssignedStreams.emplace_back(spectrumLossModel);
         }
     }
