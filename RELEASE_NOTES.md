@@ -23,6 +23,11 @@ New user-visible features
 
 Bugs fixed
 ----------
+- Fixed ``gsoc-leo-demo-example`` attaching the ground terminal to a satellite
+  below its horizon. ``NrHelper::AttachToClosestGnb()`` compared the ground
+  terminal's topocentric ``GetPosition()`` with the satellites' ECEF positions,
+  so it picked the satellite on the far side of the Earth. The ground terminal
+  now uses ``GeocentricEcefMobilityModel`` (#284).
 
 Release NR-v5.1
 ---------------

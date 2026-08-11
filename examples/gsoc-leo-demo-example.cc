@@ -6,7 +6,7 @@
 #include "math.h"
 
 #include "ns3/core-module.h"
-#include "ns3/geocentric-constant-position-mobility-model.h"
+#include "ns3/geocentric-ecef-mobility-model.h"
 #include "ns3/geographic-positions.h"
 #include "ns3/internet-module.h"
 #include "ns3/isotropic-antenna-model.h"
@@ -35,7 +35,7 @@ NS_LOG_COMPONENT_DEFINE("GsocLeoNrExample");
  *    the ns-3 mobility module) to create the constellation. The orbit can be the default single
  *    shell, a set of shells loaded from a CSV file (--orbitFile), or tuned from the command line
  *    (e.g. --altitudeKm).
- *  - A ground terminal with a fixed geographic position (GeocentricConstantPositionMobilityModel),
+ *  - A ground terminal with a fixed geographic position (GeocentricEcefMobilityModel),
  *    placed beneath the first satellite.
  *  - The 3GPP NTN channel and propagation models, selected per scenario through the NrChannelHelper
  *    (--scenario, default "NTN-Rural").
@@ -328,8 +328,8 @@ main(int argc, char* argv[])
 
     // create node on the ground, create mobility, set position and aggregate mobility
     Ptr<Node> groundNode = CreateObject<Node>();
-    Ptr<GeocentricConstantPositionMobilityModel> groundNodeMobility =
-        CreateObject<GeocentricConstantPositionMobilityModel>();
+    Ptr<GeocentricEcefMobilityModel> groundNodeMobility =
+        CreateObject<GeocentricEcefMobilityModel>();
 
     // get the first satellite instantiated and place ground node beneath it
     auto firstSatelliteMobility = satellites.Get(0)->GetObject<MobilityModel>();
