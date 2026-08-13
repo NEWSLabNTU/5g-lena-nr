@@ -213,6 +213,7 @@ NrPhy::NrPhy()
 NrPhy::~NrPhy()
 {
     NS_LOG_FUNCTION(this);
+    delete m_phySapProvider;
 }
 
 void
@@ -230,7 +231,6 @@ NrPhy::DoDispose()
         m_spectrumPhy->Dispose();
     }
     m_spectrumPhy = nullptr;
-    delete m_phySapProvider;
 }
 
 void
