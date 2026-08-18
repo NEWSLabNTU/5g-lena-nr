@@ -12,18 +12,16 @@
 
 #include "nr-qos-rule.h"
 
+#include "ns3/iana-ieee802-numbers.h"
+#include "ns3/iana-internet-protocol-numbers.h"
 #include "ns3/icmpv4-l4-protocol.h"
 #include "ns3/icmpv6-l4-protocol.h"
 #include "ns3/ipv4-header.h"
-#include "ns3/ipv4-l3-protocol.h"
 #include "ns3/ipv6-header.h"
-#include "ns3/ipv6-l3-protocol.h"
 #include "ns3/log.h"
 #include "ns3/packet.h"
 #include "ns3/tcp-header.h"
-#include "ns3/tcp-l4-protocol.h"
 #include "ns3/udp-header.h"
-#include "ns3/udp-l4-protocol.h"
 
 namespace ns3
 {
@@ -100,7 +98,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
     uint16_t localPort = 0;
     uint16_t remotePort = 0;
 
-    if (protocolNumber == Ipv4L3Protocol::PROT_NUMBER)
+    if (protocolNumber == iana::ieee802numbers::IPV4)
     {
         Ipv4Header ipv4Header;
         pCopy->RemoveHeader(ipv4Header);
@@ -136,7 +134,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
         // i.e. it is the first one but it is not the last one
         if (fragmentOffset == 0)
         {
-            if (protocol == UdpL4Protocol::PROT_NUMBER && payloadSize >= 8)
+            if (protocol == iana::internetprotocolnumbers::UDP && payloadSize >= 8)
             {
                 UdpHeader udpHeader;
                 pCopy->RemoveHeader(udpHeader);
@@ -161,7 +159,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
                     m_classifiedIpv4Fragments[fragmentKey] = std::make_pair(localPort, remotePort);
                 }
             }
-            else if (protocol == TcpL4Protocol::PROT_NUMBER && payloadSize >= 20)
+            else if (protocol == iana::internetprotocolnumbers::TCP && payloadSize >= 20)
             {
                 TcpHeader tcpHeader;
                 pCopy->RemoveHeader(tcpHeader);
@@ -216,7 +214,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
             }
         }
     }
-    else if (protocolNumber == Ipv6L3Protocol::PROT_NUMBER)
+    else if (protocolNumber == iana::ieee802numbers::IPV6)
     {
         Ipv6Header ipv6Header;
         pCopy->RemoveHeader(ipv6Header);
@@ -238,7 +236,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
         protocol = ipv6Header.GetNextHeader();
         tos = ipv6Header.GetTrafficClass();
 
-        if (protocol == UdpL4Protocol::PROT_NUMBER)
+        if (protocol == iana::internetprotocolnumbers::UDP)
         {
             UdpHeader udpHeader;
             pCopy->RemoveHeader(udpHeader);
@@ -254,7 +252,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
                 localPort = udpHeader.GetDestinationPort();
             }
         }
-        else if (protocol == TcpL4Protocol::PROT_NUMBER)
+        else if (protocol == iana::internetprotocolnumbers::TCP)
         {
             TcpHeader tcpHeader;
             pCopy->RemoveHeader(tcpHeader);
@@ -275,7 +273,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
         NS_ABORT_MSG("NrQosRuleClassifier::Classify - Unknown IP type...");
     }
 
-    if (protocolNumber == Ipv4L3Protocol::PROT_NUMBER)
+    if (protocolNumber == iana::ieee802numbers::IPV4)
     {
         NS_LOG_INFO("Classifying packet:" << " localAddr=" << localAddressIpv4 << " remoteAddr="
                                           << remoteAddressIpv4 << " localPort=" << localPort
@@ -306,7 +304,7 @@ NrQosRuleClassifier::Classify(Ptr<Packet> p,
             }
         }
     }
-    else if (protocolNumber == Ipv6L3Protocol::PROT_NUMBER)
+    else if (protocolNumber == iana::ieee802numbers::IPV6)
     {
         NS_LOG_INFO("Classifying packet:" << " localAddr=" << localAddressIpv6 << " remoteAddr="
                                           << remoteAddressIpv6 << " localPort=" << localPort

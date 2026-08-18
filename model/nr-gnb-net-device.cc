@@ -13,8 +13,7 @@
 #include "nr-gnb-rrc.h"
 
 #include "ns3/abort.h"
-#include "ns3/ipv4-l3-protocol.h"
-#include "ns3/ipv6-l3-protocol.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/log.h"
 #include "ns3/object-map.h"
 #include "ns3/pointer.h"
@@ -236,8 +235,8 @@ bool
 NrGnbNetDevice::DoSend(Ptr<Packet> packet, const Address& dest, uint16_t protocolNumber)
 {
     NS_LOG_FUNCTION(this << packet << dest << protocolNumber);
-    NS_ABORT_MSG_IF(protocolNumber != Ipv4L3Protocol::PROT_NUMBER &&
-                        protocolNumber != Ipv6L3Protocol::PROT_NUMBER,
+    NS_ABORT_MSG_IF(protocolNumber != iana::ieee802numbers::IPV4 &&
+                        protocolNumber != iana::ieee802numbers::IPV6,
                     "unsupported protocol " << protocolNumber
                                             << ", only IPv4 and IPv6 are supported");
 

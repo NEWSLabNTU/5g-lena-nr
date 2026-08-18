@@ -5,6 +5,7 @@
 #include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
@@ -180,7 +181,7 @@ SendPacket(Ptr<NetDevice> device, Address& addr)
     pkt->AddHeader(ipHeader);
     NrQosFlowTag tag(1, 1);
     pkt->AddPacketTag(tag);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 void

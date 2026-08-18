@@ -5,6 +5,7 @@
 #include "ns3/antenna-module.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/network-module.h"
@@ -129,7 +130,7 @@ SendPacket(const Ptr<NetDevice>& device, const Address& addr)
     NrQosFlowTag tag(1, 1);
     pkt->AddPacketTag(tag);
     pkt->AddHeader(header);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 static const std::unordered_map<NrControlMessage::messageType, std::string, std::hash<int>>

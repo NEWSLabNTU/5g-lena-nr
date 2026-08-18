@@ -6,9 +6,9 @@
 
 #include "ns3/channel.h"
 #include "ns3/error-model.h"
-#include "ns3/ipv4-l3-protocol.h"
+#include "ns3/iana-ieee802-numbers.h"
+#include "ns3/ipv4-header.h"
 #include "ns3/ipv6-header.h"
-#include "ns3/ipv6-l3-protocol.h"
 #include "ns3/log.h"
 #include "ns3/node.h"
 #include "ns3/pointer.h"
@@ -234,7 +234,7 @@ NrNetDevice::Receive(Ptr<Packet> p)
                                 << ". IPv4 packet from " << ipv4Header.GetSource() << " to "
                                 << ipv4Header.GetDestination());
         m_rxTrace(p);
-        m_rxCallback(this, p, Ipv4L3Protocol::PROT_NUMBER, Address());
+        m_rxCallback(this, p, iana::ieee802numbers::IPV4, Address());
     }
     else if (p->PeekHeader(ipv6Header) != 0)
     {
@@ -242,7 +242,7 @@ NrNetDevice::Receive(Ptr<Packet> p)
                                 << ". IPv6 packet from " << ipv6Header.GetSource() << " to "
                                 << ipv6Header.GetDestination());
         m_rxTrace(p);
-        m_rxCallback(this, p, Ipv6L3Protocol::PROT_NUMBER, Address());
+        m_rxCallback(this, p, iana::ieee802numbers::IPV6, Address());
     }
     else
     {

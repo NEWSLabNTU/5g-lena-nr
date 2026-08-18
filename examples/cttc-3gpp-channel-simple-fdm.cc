@@ -42,6 +42,7 @@
 #include "ns3/antenna-module.h"
 #include "ns3/config-store.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-ieee802-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/log.h"
@@ -83,7 +84,7 @@ SendPacket(Ptr<NetDevice> device, Address& addr, uint32_t packetSize)
     // will have QoS Flow ID = 3;
     NrQosFlowTag tag(1, 3);
     pkt->AddPacketTag(tag);
-    device->Send(pkt, addr, Ipv4L3Protocol::PROT_NUMBER);
+    device->Send(pkt, addr, iana::ieee802numbers::IPV4);
 }
 
 /**

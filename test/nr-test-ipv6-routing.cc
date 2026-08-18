@@ -21,6 +21,7 @@
 
 #include "ns3/config-store.h"
 #include "ns3/core-module.h"
+#include "ns3/iana-internet-protocol-numbers.h"
 #include "ns3/internet-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/ipv6-static-routing.h"
@@ -121,7 +122,7 @@ NrIpv6RoutingTestCase::SentAtClient(Ptr<const Packet> p, Ptr<Ipv6> ipv6, uint32_
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_clientTxPkts.push_back(p->Copy());
     }
@@ -132,7 +133,7 @@ NrIpv6RoutingTestCase::ReceivedAtClient(Ptr<const Packet> p, Ptr<Ipv6> ipv6, uin
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_clientRxPkts.push_back(p->Copy());
     }
@@ -143,7 +144,7 @@ NrIpv6RoutingTestCase::GnbToPgw(Ptr<Packet> p)
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_pgwUidRxFrmGnb.push_back(p->GetUid());
     }
@@ -154,7 +155,7 @@ NrIpv6RoutingTestCase::TunToPgw(Ptr<Packet> p)
 {
     Ipv6Header ipv6Header;
     p->PeekHeader(ipv6Header);
-    if (ipv6Header.GetNextHeader() == UdpL4Protocol::PROT_NUMBER)
+    if (ipv6Header.GetNextHeader() == iana::internetprotocolnumbers::UDP)
     {
         m_pgwUidRxFrmTun.push_back(p->GetUid());
     }
