@@ -512,19 +512,9 @@ main(int argc, char* argv[])
     ulClientHelper.SetAttribute("Interval", TimeValue(MilliSeconds(10)));
     clientApps.Add(ulClientHelper.Install(groundNode));
 
-    // Attach UEs to the closest gNB
-    nrHelper->AttachToClosestGnb(groundNodeNetDev, gnbNetDev);
-
-    // Start server and client apps
-    serverApps.Start(MilliSeconds(400));
-    clientApps.Start(MilliSeconds(400));
-    serverApps.Stop(Seconds(duration));
-    clientApps.Stop(Seconds(duration) - MilliSeconds(200));
-
-    // Enable the traces provided by the nr module
-    nrHelper->EnableTraces();
-
-    // Schedule UpdateAntennaOrientation events for every sat. node to update antenna orientation
+    // Initialize the satellite antenna orientations before attachment so that the initial
+    // beamforming vectors are calculated for the oriented panels. Each call also schedules the
+    // subsequent periodic orientation updates.
     for (uint32_t i = 0; i < gnbNetDev.GetN(); i++)
     {
         auto satNetDevice = gnbNetDev.Get(i);
@@ -536,6 +526,18 @@ main(int argc, char* argv[])
         satNode->AggregateObject(satAntenna);
         UpdateAntennaOrientation(satNode, satAntenna, MilliSeconds(precision));
     }
+
+    // Attach UEs to the closest gNB
+    nrHelper->AttachToClosestGnb(groundNodeNetDev, gnbNetDev);
+
+    // Start server and client apps
+    serverApps.Start(MilliSeconds(400));
+    clientApps.Start(MilliSeconds(400));
+    serverApps.Stop(Seconds(duration));
+    clientApps.Stop(Seconds(duration) - MilliSeconds(200));
+
+    // Enable the traces provided by the nr module
+    nrHelper->EnableTraces();
 
     std::streambuf* coutbuf = std::cout.rdbuf();
 
