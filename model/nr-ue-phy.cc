@@ -1339,7 +1339,7 @@ NrUePhy::EndVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
         // running on the target BWP instead of asserting; StartSlot() detects
         // the numerology change and cleanly re-stamps the loop from there.
         Time delay = m_lastSlotStart + GetSlotPeriod() - Simulator::Now();
-        if (delay.IsNegative())
+        if (delay.IsStrictlyNegative())
         {
             NS_LOG_WARN("Clamping next-slot start "
                         << delay << " in the past to now, due to a BWP/numerology switch");
@@ -1364,7 +1364,7 @@ NrUePhy::EndVarTti(const std::shared_ptr<DciInfoElementTdma>& dci)
         // Clamp such a stale allocation to the current instant so that it is
         // still processed (keeping the data plane alive across the handover)
         // without scheduling an event in the past.
-        if (delay.IsNegative())
+        if (delay.IsStrictlyNegative())
         {
             NS_LOG_WARN("Clamping VarTti scheduled "
                         << delay << " in the past to now, due to a BWP/numerology switch");
