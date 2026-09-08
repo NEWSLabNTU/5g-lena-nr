@@ -28,6 +28,15 @@ Bugs fixed
   terminal's topocentric ``GetPosition()`` with the satellites' ECEF positions,
   so it picked the satellite on the far side of the Earth. The ground terminal
   now uses ``GeocentricEcefMobilityModel`` (#284).
+- Fixed the UE MAC terminating the simulation with an ``std::out_of_range``
+  exception when an uplink grant arrived for a logical channel that had been
+  removed from the MAC. The RLC entity of a channel dropped on handover, or by
+  the ``DoReset()`` preceding a re-establishment, keeps its service access point
+  and can still report a buffer status. That report was recorded even though no
+  ``NrMacSapUser`` remained to serve it, leaving an LCID in the buffer status map
+  with no entry in the logical channel map; the next uplink grant selected it and
+  ``SendNewStatusData()``, ``SendRetxData()`` or ``SendTxData()`` threw while
+  looking it up. Such reports are now discarded when they arrive.
 
 Release NR-v5.1
 ---------------

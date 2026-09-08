@@ -107,6 +107,7 @@ class NR_EXPORT NrUeMac : public Object
     friend class UeMemberNrUeCmacSapProvider;
     friend class UeMemberNrMacSapProvider;
     friend class MacUeMemberPhySapUser;
+    friend class NrUeMacStaleBsrTestCase;
 
   public:
     /**

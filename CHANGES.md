@@ -56,6 +56,7 @@ us a note on ns-developers mailing list.
 - Following the ns-3 spectrum change that passes beamforming vectors explicitly (ns-3 issue #1369), ``NYUSpectrumPropagationLossModel`` and ``DistanceBasedThreeGppSpectrumPropagationLossModel`` overrides of ``DoCalcRxPowerSpectralDensity()`` and ``GetLongTerm()`` take the two beamforming vectors as parameters, and callers of ``CalcRxPowerSpectralDensity()`` and ``DoCalcRxPowerSpectralDensity()`` now pass them (typically ``array->GetBeamformingVector()``) instead of relying on the arrays' current state.
 
 ### Changed Behavior
+- The UE MAC now discards a buffer status report whose logical channel is not configured in the MAC, instead of recording it. The RLC entity of a logical channel that the MAC has dropped (on handover, or through the ``DoReset()`` that precedes a re-establishment) keeps the service access point it was given and can still report a buffer status; such a report can never be served, because no ``NrMacSapUser`` is left to receive the transmission opportunity. Recording it left an LCID in the buffer status map with no counterpart in the logical channel map, which ``NrUeMac::SendNewStatusData()``, ``SendRetxData()`` and ``SendTxData()`` then looked up unconditionally, terminating the simulation with an ``std::out_of_range`` exception when the next uplink grant selected that channel.
 
 ## Changes from NR-v5.0 to v5.1
 

@@ -435,6 +435,19 @@ NrUeMac::DoTransmitBufferStatusReport(NrMacSapProvider::BufferStatusReportParame
 {
     NS_LOG_FUNCTION(this << static_cast<uint32_t>(params.lcid));
 
+    // The RLC entity of a logical channel that the MAC has dropped (handover, or the
+    // DoReset() that precedes a re-establishment) keeps the SAP it was given and can still
+    // report a buffer status. Such a report can never be served, because no NrMacSapUser is
+    // left to receive the transmission opportunity, and recording it would leave an LCID in
+    // m_ulBsrReceived that SendNewStatusData(), SendRetxData() and SendTxData() go on to look
+    // up in m_lcInfoMap.
+    if (m_lcInfoMap.find(params.lcid) == m_lcInfoMap.end())
+    {
+        NS_LOG_WARN("Discarding the BSR of LCID " << static_cast<uint32_t>(params.lcid)
+                                                  << ", which is not configured in this MAC");
+        return;
+    }
+
     auto it = m_ulBsrReceived.find(params.lcid);
 
     NS_LOG_INFO("Received BSR for LC Id" << static_cast<uint32_t>(params.lcid));

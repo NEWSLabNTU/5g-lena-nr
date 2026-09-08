@@ -500,6 +500,7 @@ set(test_sources
     test/nr-interference-overlap-test.cc
     test/nr-interference-saturating-signal-test.cc
     test/nr-ue-handover-interference-test.cc
+    test/nr-ue-mac-stale-bsr-test.cc
     test/nr-x2-forwarding-drop-test.cc
     test/nr-test-ipv6-routing.cc
     test/nr-test-l2sm-eesm.cc
