@@ -1572,6 +1572,13 @@ class NR_EXPORT NrGnbRrc : public Object
     void RemoveUe(uint16_t rnti);
 
     /**
+     * Return an RNTI reserved by RemoveUe() to the allocation pool.
+     *
+     * @param rnti the C-RNTI to release
+     */
+    void ReleaseRntiReservation(uint16_t rnti);
+
+    /**
      *
      * @param flow the specification of a QoS flow
      *
@@ -1737,6 +1744,14 @@ class NR_EXPORT NrGnbRrc : public Object
     uint16_t m_ulBandwidth;
     /// Last allocated RNTI
     uint16_t m_lastAllocatedRnti;
+    /**
+     * RNTIs of UE contexts destroyed while a handover was still in progress, kept out of the
+     * allocation pool until the X2 exchange that names them concludes. Reusing one straight
+     * away would make a late UE CONTEXT RELEASE address whichever UE inherited it.
+     */
+    std::map<uint16_t, EventId> m_reservedRntis;
+    /// How long an RNTI stays reserved after a handover was interrupted
+    Time m_rntiReservationDuration;
 
     /// The System Information Block Type 1 that is currently broadcasted over BCH.
     std::vector<NrRrcSap::SystemInformationBlockType1> m_sib1;

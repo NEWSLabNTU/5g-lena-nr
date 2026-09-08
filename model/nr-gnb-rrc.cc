@@ -2114,6 +2114,11 @@ NrGnbRrc::DoDispose()
         delete cmacSapUser;
     }
     m_cmacSapUser.clear();
+    for (auto& reserved : m_reservedRntis)
+    {
+        reserved.second.Cancel();
+    }
+    m_reservedRntis.clear();
     m_ueMap.clear();
     delete m_handoverManagementSapUser;
     delete m_ccmRrcSapUser;
@@ -2211,6 +2216,16 @@ NrGnbRrc::GetTypeId()
                           "(A->B->C is still allowed). 0 (the default) disables the guard.",
                           TimeValue(MilliSeconds(0)),
                           MakeTimeAccessor(&NrGnbRrc::m_handoverMinTimeOfStay),
+                          MakeTimeChecker())
+            .AddAttribute("RntiReservationDuration",
+                          "How long the C-RNTI of a UE context destroyed while a handover was "
+                          "still in progress is kept out of the allocation pool. An X2 message "
+                          "of that handover can still be in flight, and reusing the C-RNTI "
+                          "before it arrives makes it address the UE that inherited the value. "
+                          "The reservation is lifted as soon as the UE CONTEXT RELEASE that "
+                          "concludes the handover is received.",
+                          TimeValue(MilliSeconds(500)),
+                          MakeTimeAccessor(&NrGnbRrc::m_rntiReservationDuration),
                           MakeTimeChecker())
             .AddAttribute("HandoverLeavingTimeoutDuration",
                           "After issuing a Handover Command, if neither RRC "
@@ -3434,6 +3449,9 @@ NrGnbRrc::DoRecvUeContextRelease(NrEpcX2SapUser::UeContextReleaseParams params)
         GetUeManager(rnti)->RecvUeContextRelease(params);
         RemoveUe(rnti);
     }
+    // The handover this message concludes is over, so the RNTI it names may be handed out
+    // again, whether the context was removed just now or earlier by an interrupted handover.
+    ReleaseRntiReservation(rnti);
 }
 
 void
@@ -3711,7 +3729,8 @@ NrGnbRrc::AddUe(NrUeManager::State state, uint8_t componentCarrierId)
     uint16_t rnti;
     for (rnti = m_lastAllocatedRnti + 1; (rnti != m_lastAllocatedRnti - 1) && (!found); ++rnti)
     {
-        if ((rnti != 0) && (m_ueMap.find(rnti) == m_ueMap.end()))
+        if ((rnti != 0) && (m_ueMap.find(rnti) == m_ueMap.end()) &&
+            (m_reservedRntis.find(rnti) == m_reservedRntis.end()))
         {
             found = true;
             break;
@@ -3733,6 +3752,18 @@ NrGnbRrc::AddUe(NrUeManager::State state, uint8_t componentCarrierId)
 }
 
 void
+NrGnbRrc::ReleaseRntiReservation(uint16_t rnti)
+{
+    NS_LOG_FUNCTION(this << rnti);
+    auto it = m_reservedRntis.find(rnti);
+    if (it != m_reservedRntis.end())
+    {
+        it->second.Cancel();
+        m_reservedRntis.erase(it);
+    }
+}
+
+void
 NrGnbRrc::RemoveUe(uint16_t rnti)
 {
     NS_LOG_FUNCTION(this << (uint32_t)rnti);
@@ -3740,6 +3771,20 @@ NrGnbRrc::RemoveUe(uint16_t rnti)
     NS_ASSERT_MSG(it != m_ueMap.end(), "request to remove UE info with unknown rnti " << rnti);
     uint64_t imsi = it->second->GetImsi();
     uint16_t srsCi = (*it).second->GetSrsConfigurationIndex();
+    // A context torn down with a handover still in progress leaves X2 messages in flight that
+    // name this RNTI. Keep it out of the allocation pool until the handover concludes, so a
+    // late message cannot address whichever UE would otherwise have inherited it.
+    NrUeManager::State state = it->second->GetState();
+    if (state == NrUeManager::HANDOVER_PREPARATION || state == NrUeManager::HANDOVER_JOINING ||
+        state == NrUeManager::HANDOVER_PATH_SWITCH || state == NrUeManager::HANDOVER_LEAVING)
+    {
+        NS_LOG_INFO("Reserving RNTI " << rnti << " removed in state " << ToString(state));
+        ReleaseRntiReservation(rnti);
+        m_reservedRntis[rnti] = Simulator::Schedule(m_rntiReservationDuration,
+                                                    &NrGnbRrc::ReleaseRntiReservation,
+                                                    this,
+                                                    rnti);
+    }
     // Drop any pending handover-trigger timestamp for a UE that leaves without
     // completing a handover (e.g. handover failure), so the map does not leak.
     m_handoverTriggerTime.erase(imsi);

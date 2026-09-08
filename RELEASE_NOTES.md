@@ -28,6 +28,13 @@ Bugs fixed
   terminal's topocentric ``GetPosition()`` with the satellites' ECEF positions,
   so it picked the satellite on the far side of the Earth. The ground terminal
   now uses ``GeocentricEcefMobilityModel`` (#284).
+- Fixed the gNB RRC reusing the C-RNTI of a UE context destroyed while its
+  handover was still in progress. ``AddUe()`` hands out the first C-RNTI absent
+  from the UE map, so the value became available again while the X2 messages of
+  the interrupted handover were still in flight, and a UE CONTEXT RELEASE
+  arriving afterwards released whichever UE had inherited it. Such a C-RNTI is
+  now reserved until the handover concludes, or at the latest for the new
+  ``NrGnbRrc::RntiReservationDuration`` (500 ms by default).
 - Fixed the UE MAC terminating the simulation with an ``std::out_of_range``
   exception when an uplink grant arrived for a logical channel that had been
   removed from the MAC. The RLC entity of a channel dropped on handover, or by
