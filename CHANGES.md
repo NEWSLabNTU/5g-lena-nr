@@ -52,6 +52,9 @@ us a note on ns-developers mailing list.
 
 ### New API:
 
+### Changes to Existing API
+- Following the ns-3 spectrum change that passes beamforming vectors explicitly (ns-3 issue #1369), ``NYUSpectrumPropagationLossModel`` and ``DistanceBasedThreeGppSpectrumPropagationLossModel`` overrides of ``DoCalcRxPowerSpectralDensity()`` and ``GetLongTerm()`` take the two beamforming vectors as parameters, and callers of ``CalcRxPowerSpectralDensity()`` and ``DoCalcRxPowerSpectralDensity()`` now pass them (typically ``array->GetBeamformingVector()``) instead of relying on the arrays' current state.
+
 ### Changed Behavior
 
 ## Changes from NR-v5.0 to v5.1

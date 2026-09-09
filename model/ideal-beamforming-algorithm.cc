@@ -162,7 +162,9 @@ CellScanBeamforming::GetBeamformingVectors(const Ptr<NrSpectrumPhy>& gnbSpectrum
                             gnbMobility,
                             ueSpectrumPhy->GetMobility(),
                             gnbSpectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>(),
-                            ueSpectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>());
+                            ueSpectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>(),
+                            txW,
+                            rxW);
 
                     double power = Sum(*(rxParams->psd));
 
@@ -320,7 +322,9 @@ CellScanQuasiOmniBeamforming::GetBeamformingVectors(const Ptr<NrSpectrumPhy>& gn
                     gnbMobility,
                     ueSpectrumPhy->GetMobility(),
                     gnbSpectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>(),
-                    ueSpectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>());
+                    ueSpectrumPhy->GetAntenna()->GetObject<PhasedArrayModel>(),
+                    txW,
+                    rxW);
 
             double power = Sum(*(rxParams->psd));
 
@@ -657,7 +661,9 @@ KroneckerBeamforming::GetBeamformingVectors(const Ptr<NrSpectrumPhy>& gnbSpectru
                             gnbMobility,
                             ueSpectrumPhy->GetMobility(),
                             gnbSpectrumPhy->GetAntenna()->GetObject<UniformPlanarArray>(),
-                            ueSpectrumPhy->GetPanelByIndex(b)->GetObject<UniformPlanarArray>());
+                            ueSpectrumPhy->GetPanelByIndex(b)->GetObject<UniformPlanarArray>(),
+                            bf,
+                            bfUe);
 
                         double power = Sum(*(rxParams->psd));
                         if (power > maxPower)
@@ -792,7 +798,9 @@ KroneckerQuasiOmniBeamforming::GetBeamformingVectors(const Ptr<NrSpectrumPhy>& g
                 gnbMobility,
                 ueSpectrumPhy->GetMobility(),
                 gnbSpectrumPhy->GetAntenna()->GetObject<UniformPlanarArray>(),
-                ueSpectrumPhy->GetAntenna()->GetObject<UniformPlanarArray>());
+                ueSpectrumPhy->GetAntenna()->GetObject<UniformPlanarArray>(),
+                bf,
+                uebfV);
 
             double power = Sum(*(rxParams->psd));
             if (power > maxPower)

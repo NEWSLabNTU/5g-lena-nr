@@ -389,7 +389,9 @@ NrInitialAssociation::ComputeMaxRsrp(const Ptr<NetDevice>& gnbDevice, LocalSearc
                     mobility.gnbMobility,
                     mobility.ueMobility,
                     antennas.gnbArrayModel,
-                    antennas.ueArrayModel[k]);
+                    antennas.ueArrayModel[k],
+                    bf,
+                    antennas.ueArrayModel[k]->GetBeamformingVector());
                 if (!rxParam->spectrumChannelMatrix)
                 {
                     // out-of-range (see DistanceBasedThreeGppSpectrumPropagationLossModel)
@@ -462,7 +464,9 @@ NrInitialAssociation::ComputeMaxRsrpClean(const Ptr<NetDevice>& gnbDevice,
                     mobility.gnbMobility,
                     mobility.ueMobility,
                     antennas.gnbArrayModel,
-                    antennas.ueArrayModel[k]);
+                    antennas.ueArrayModel[k],
+                    bf,
+                    antennas.ueArrayModel[k]->GetBeamformingVector());
                 if (!rxParam->spectrumChannelMatrix)
                 {
                     continue;

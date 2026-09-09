@@ -257,7 +257,9 @@ main(int argc, char* argv[])
                                                           txMob,
                                                           rxMob,
                                                           Copy(txAntenna),
-                                                          Copy(rxAntenna));
+                                                          Copy(rxAntenna),
+                                                          txAntenna->GetBeamformingVector(),
+                                                          rxAntenna->GetBeamformingVector());
     std::cout << "Average rx power 1: "
               << 10 * log10(Sum(*(rxParams1->psd)) /
                             rxParams1->psd->GetSpectrumModel()->GetNumBands())
@@ -316,7 +318,9 @@ main(int argc, char* argv[])
                                                           txMob,
                                                           rxMob,
                                                           txAntenna2,
-                                                          rxAntenna2);
+                                                          rxAntenna2,
+                                                          txAntenna2->GetBeamformingVector(),
+                                                          rxAntenna2->GetBeamformingVector());
     std::cout << "Average rx power 1: "
               << 10 * log10(Sum(*(rxParams2->psd)) /
                             rxParams2->psd->GetSpectrumModel()->GetNumBands())

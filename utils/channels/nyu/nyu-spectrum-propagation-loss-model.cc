@@ -222,25 +222,19 @@ PhasedArrayModel::ComplexVector
 NYUSpectrumPropagationLossModel::GetLongTerm(
     Ptr<const MatrixBasedChannelModel::ChannelMatrix> channelMatrix,
     Ptr<const PhasedArrayModel> aPhasedArrayModel,
-    Ptr<const PhasedArrayModel> bPhasedArrayModel) const
+    Ptr<const PhasedArrayModel> bPhasedArrayModel,
+    const PhasedArrayModel::ComplexVector& aBeamformingVector,
+    const PhasedArrayModel::ComplexVector& bBeamformingVector) const
 {
     PhasedArrayModel::ComplexVector
         longTerm; // vector containing the long term component for each cluster
 
     // check if the channel matrix was generated considering a as the s-node and
     // b as the u-node or vice-versa
-    PhasedArrayModel::ComplexVector sW;
-    PhasedArrayModel::ComplexVector uW;
-    if (!channelMatrix->IsReverse(aPhasedArrayModel->GetId(), bPhasedArrayModel->GetId()))
-    {
-        sW = aPhasedArrayModel->GetBeamformingVector();
-        uW = bPhasedArrayModel->GetBeamformingVector();
-    }
-    else
-    {
-        sW = bPhasedArrayModel->GetBeamformingVector();
-        uW = aPhasedArrayModel->GetBeamformingVector();
-    }
+    const bool isReverse =
+        channelMatrix->IsReverse(aPhasedArrayModel->GetId(), bPhasedArrayModel->GetId());
+    const PhasedArrayModel::ComplexVector& sW = isReverse ? bBeamformingVector : aBeamformingVector;
+    const PhasedArrayModel::ComplexVector& uW = isReverse ? aBeamformingVector : bBeamformingVector;
 
     bool update = false;   // indicates whether the long term has to be updated
     bool notFound = false; // indicates if the long term has not been computed yet
@@ -293,7 +287,9 @@ NYUSpectrumPropagationLossModel::DoCalcRxPowerSpectralDensity(
     Ptr<const MobilityModel> a,
     Ptr<const MobilityModel> b,
     Ptr<const PhasedArrayModel> aPhasedArrayModel,
-    Ptr<const PhasedArrayModel> bPhasedArrayModel) const
+    Ptr<const PhasedArrayModel> bPhasedArrayModel,
+    const PhasedArrayModel::ComplexVector& aBeamformingVector,
+    const PhasedArrayModel::ComplexVector& bBeamformingVector) const
 {
     NS_LOG_FUNCTION(this);
     uint32_t aId = a->GetObject<Node>()->GetId(); // id of the node a
@@ -317,8 +313,11 @@ NYUSpectrumPropagationLossModel::DoCalcRxPowerSpectralDensity(
         m_channelModel->GetParams(a, b);
 
     // retrieve the long term component
-    PhasedArrayModel::ComplexVector longTerm =
-        GetLongTerm(channelMatrix, aPhasedArrayModel, bPhasedArrayModel);
+    PhasedArrayModel::ComplexVector longTerm = GetLongTerm(channelMatrix,
+                                                           aPhasedArrayModel,
+                                                           bPhasedArrayModel,
+                                                           aBeamformingVector,
+                                                           bBeamformingVector);
 
     // apply the beamforming gain
     rxParams->psd = CalcBeamformingGain(rxParams->psd,

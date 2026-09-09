@@ -97,11 +97,13 @@ class NR_EXPORT NYUSpectrumPropagationLossModel : public PhasedArraySpectrumProp
      * a certain channel is cached and recomputed only when the channel realization
      * is updated, or when the beamforming vectors change.
      *
-     * @param txPsd tx PSD
+     * @param params tx spectrum signal parameters
      * @param a first node mobility model
      * @param b second node mobility model
      * @param aPhasedArrayModel the antenna array of the first node
      * @param bPhasedArrayModel the antenna array of the second node
+     * @param aBeamformingVector the beamforming vector of the first node's array
+     * @param bBeamformingVector the beamforming vector of the second node's array
      * @return the received spectrum signal
      */
     Ptr<SpectrumSignalParameters> DoCalcRxPowerSpectralDensity(
@@ -109,7 +111,9 @@ class NR_EXPORT NYUSpectrumPropagationLossModel : public PhasedArraySpectrumProp
         Ptr<const MobilityModel> a,
         Ptr<const MobilityModel> b,
         Ptr<const PhasedArrayModel> aPhasedArrayModel,
-        Ptr<const PhasedArrayModel> bPhasedArrayModel) const override;
+        Ptr<const PhasedArrayModel> bPhasedArrayModel,
+        const PhasedArrayModel::ComplexVector& aBeamformingVector,
+        const PhasedArrayModel::ComplexVector& bBeamformingVector) const override;
 
     int64_t DoAssignStreams(int64_t stream) override;
 
@@ -142,12 +146,16 @@ class NR_EXPORT NYUSpectrumPropagationLossModel : public PhasedArraySpectrumProp
      * @param channelMatrix the channel matrix
      * @param aPhasedArrayModel the antenna array of the tx device
      * @param bPhasedArrayModel the antenna array of the rx device
+     * @param aBeamformingVector the beamforming vector of the tx device's array
+     * @param bBeamformingVector the beamforming vector of the rx device's array
      * @return vector containing the long term component for each cluster
      */
     PhasedArrayModel::ComplexVector GetLongTerm(
         Ptr<const MatrixBasedChannelModel::ChannelMatrix> channelMatrix,
         Ptr<const PhasedArrayModel> aPhasedArrayModel,
-        Ptr<const PhasedArrayModel> bPhasedArrayModel) const;
+        Ptr<const PhasedArrayModel> bPhasedArrayModel,
+        const PhasedArrayModel::ComplexVector& aBeamformingVector,
+        const PhasedArrayModel::ComplexVector& bBeamformingVector) const;
     /**
      * Computes the long term component
      * @param channelMatrix the channel matrix H

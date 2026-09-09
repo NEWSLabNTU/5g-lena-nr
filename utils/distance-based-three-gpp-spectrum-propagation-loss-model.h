@@ -66,6 +66,8 @@ class NR_EXPORT DistanceBasedThreeGppSpectrumPropagationLossModel
      * @param b second node mobility model
      * @param aPhasedArrayModel the antenna array of the first node
      * @param bPhasedArrayModel the antenna array of the second node
+     * @param aBeamformingVector the beamforming vector of the first node's array
+     * @param bBeamformingVector the beamforming vector of the second node's array
      * @return the received PSD
      */
     Ptr<SpectrumSignalParameters> DoCalcRxPowerSpectralDensity(
@@ -73,7 +75,9 @@ class NR_EXPORT DistanceBasedThreeGppSpectrumPropagationLossModel
         Ptr<const MobilityModel> a,
         Ptr<const MobilityModel> b,
         Ptr<const PhasedArrayModel> aPhasedArrayModel,
-        Ptr<const PhasedArrayModel> bPhasedArrayModel) const override;
+        Ptr<const PhasedArrayModel> bPhasedArrayModel,
+        const PhasedArrayModel::ComplexVector& aBeamformingVector,
+        const PhasedArrayModel::ComplexVector& bBeamformingVector) const override;
 
   private:
     double m_maxDistance{1000}; //!< the maximum distance of the nodes a and b in order to calculate
