@@ -14,6 +14,7 @@
 #include "ns3/ipv4.h"
 #include "ns3/log.h"
 #include "ns3/mac48-address.h"
+#include "ns3/packet-socket.h"
 #include "ns3/uinteger.h"
 
 namespace ns3
@@ -267,6 +268,14 @@ NrEpcGnbApplication::RecvFromNrSocket(Ptr<Socket> socket)
         NS_ASSERT(socket == m_nrSocket);
     }
     Ptr<Packet> packet = socket->Recv();
+
+    // The packet socket stamps every packet it delivers with the parameters of that delivery.
+    // This packet is relayed onwards, and can reach another packet socket, which would stamp
+    // it a second time and abort; the hop those tags describe is over, so drop them here.
+    PacketSocketTag socketTag;
+    packet->RemovePacketTag(socketTag);
+    DeviceNameTag deviceNameTag;
+    packet->RemovePacketTag(deviceNameTag);
 
     NrQosFlowTag tag;
     bool found = packet->RemovePacketTag(tag);

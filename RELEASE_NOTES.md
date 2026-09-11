@@ -28,6 +28,13 @@ Bugs fixed
   terminal's topocentric ``GetPosition()`` with the satellites' ECEF positions,
   so it picked the satellite on the far side of the Earth. The ground terminal
   now uses ``GeocentricEcefMobilityModel`` (#284).
+- Fixed the simulation aborting with "cannot add the same kind of tag twice" when
+  a packet reached a packet socket that had already delivered it. The tags a
+  packet socket stamps on delivery were left on the packet the gNB EPC
+  application relays to the S1-U interface, from where they were copied onto
+  every RLC segment and carried into the reassembled SDU. They are now removed
+  when the packet is taken off the NR packet socket. Covered by the new
+  ``nr-epc-gnb-relayed-tag`` test suite.
 - Fixed the gNB RRC reusing the C-RNTI of a UE context destroyed while its
   handover was still in progress. ``AddUe()`` hands out the first C-RNTI absent
   from the UE map, so the value became available again while the X2 messages of

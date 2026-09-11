@@ -468,6 +468,7 @@ set(test_sources
     test/nr-epc-test-gtpu.cc
     test/nr-epc-test-s1u-downlink.cc
     test/nr-epc-test-s1u-uplink.cc
+    test/nr-epc-gnb-relayed-tag-test.cc
     test/nr-ideal-beamforming-test.cc
     test/nr-lte-pattern-generation.cc
     test/nr-mac-short-bsr-ce-test.cc
