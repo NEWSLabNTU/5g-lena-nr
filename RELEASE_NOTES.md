@@ -20,6 +20,10 @@ Release NR-v5.2 (under development)
 
 New user-visible features
 -------------------------
+- The number of HARQ retransmissions is now configurable through the new
+  ``NrMacSchedulerNs3::MaxHarqReTx`` attribute. When ``EnableHarqReTx`` is
+  enabled, retransmission chains are bounded by transmission attempts rather
+  than by ``rv == 3``, so RV can exceed 3 when ``MaxHarqReTx`` exceeds 3.
 - Added ``NrSidelinkFilter``, a spectrum transmit filter that drops gNB-to-gNB
   and UE-to-UE NR signals before the spectrum channel computes their propagation
   loss and 3GPP channel matrices, so only gNB-to-UE and UE-to-gNB links are

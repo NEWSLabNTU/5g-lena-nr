@@ -651,6 +651,7 @@ struct NR_EXPORT RxPacketTraceParams
           m_mcs(tbInfo.m_expected.m_mcs),
           m_rank(tbInfo.m_expected.m_rank),
           m_rv(tbInfo.m_expected.m_rv),
+          m_harqProcessId(tbInfo.m_expected.m_harqProcessId),
           m_sinr(tbInfo.m_sinrAvg),
           m_sinrMin(tbInfo.m_sinrMin),
           m_tbler(errorModelEnabled ? tbInfo.m_outputOfEM->m_tbler : 0),
@@ -669,6 +670,7 @@ struct NR_EXPORT RxPacketTraceParams
     uint8_t m_mcs{std::numeric_limits<uint8_t>::max()};
     uint8_t m_rank{std::numeric_limits<uint8_t>::max()};
     uint8_t m_rv{std::numeric_limits<uint8_t>::max()};
+    uint8_t m_harqProcessId{std::numeric_limits<uint8_t>::max()};
     double m_sinr{-1.0};
     double m_sinrMin{-1.0};
     double m_tbler{-1.0};

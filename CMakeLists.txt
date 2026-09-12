@@ -528,6 +528,7 @@ set(test_sources
     test/nr-test-rrc.cc
     test/nr-test-sched-released-ue.cc
     test/nr-test-sched-harq.cc
+    test/nr-test-harq-retx-limit.cc
     test/nr-test-sched-lc.cc
     test/nr-test-sched-msg3-retx.cc
     test/nr-test-sched-ofdma-frequency-domain.cc

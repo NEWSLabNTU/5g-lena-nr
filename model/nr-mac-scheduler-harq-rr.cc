@@ -324,6 +324,7 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
             allocatedUe.push_back(dciInfoReTx->m_rnti);
 
             NS_ASSERT(dciInfoReTx->m_format == DciInfoElementTdma::DL);
+            const uint8_t nextAttempts = harqProcess.m_txAttempts + 1;
             auto dci = std::make_shared<DciInfoElementTdma>(dciInfoReTx->m_rnti,
                                                             dciInfoReTx->m_format,
                                                             dciInfoReTx->m_symStart,
@@ -342,6 +343,7 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
             dci->m_harqProcess = dciInfoReTx->m_harqProcess;
 
             harqProcess.m_dciElement = dci;
+            harqProcess.m_txAttempts = nextAttempts;
             dciInfoReTx = harqProcess.m_dciElement;
 
             VarTtiAllocInfo slotInfo(dciInfoReTx);
@@ -456,6 +458,7 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
 
             NS_ASSERT(dciInfoReTx->m_format == DciInfoElementTdma::UL);
 
+            const uint8_t nextAttempts = harqProcess.m_txAttempts + 1;
             auto dci =
                 std::make_shared<DciInfoElementTdma>(dciInfoReTx->m_rnti,
                                                      dciInfoReTx->m_format,
@@ -473,6 +476,7 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
             dci->m_rbgBitmask = harqProcess.m_dciElement->m_rbgBitmask;
             dci->m_harqProcess = harqId;
             harqProcess.m_dciElement = dci;
+            harqProcess.m_txAttempts = nextAttempts;
             dciInfoReTx = harqProcess.m_dciElement;
 
             startingPoint->m_sym -= dciInfoReTx->m_numSym;

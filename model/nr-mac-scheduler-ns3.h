@@ -27,6 +27,7 @@ class NrSchedGeneralTestCase;
 class NrSchedOfdmaSymbolPerBeamTestCase;
 class NrTestMacSchedulerHarqRrReshape;
 class NrTestMacSchedulerHarqRrScheduleDlHarq;
+class NrHarqRetxSchedulerCase;
 class NrMacSchedulerHarqRr;
 class NrMacSchedulerSrsDefault;
 class NrMacSchedulerLcAlgorithm;
@@ -245,6 +246,7 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
     friend class NrSchedGeneralTestCase;
     friend class NrTestMacSchedulerHarqRrReshape;
     friend class NrTestMacSchedulerHarqRrScheduleDlHarq;
+    friend class NrHarqRetxSchedulerCase;
     friend class NrTestMacSchedulerHarqRrBeamOrder;
     friend class NrTestMacSchedulerHarqRrSymbolBudget;
     friend class NrTestMacSchedulerHarqRrOfdmaSharing;
@@ -541,19 +543,16 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
      */
     bool IsSrsInFSlots() const;
     /**
-     * @brief Enable HARQ ReTx function
+     * @brief Enable or disable HARQ retransmissions.
      *
-     * Remember we introduced the EnableHarqReTx attribute only
-     * for FB calibration example. We want to disable HARQ ReTx
-     * because ReTx are scheduled in OFDMA fashion. In a TDMA simulation,
-     * such retransmissions change the SINR trends in a scenario. Also,
-     * REMEMBER that this solution of disabling the HARQ ReTx not very
-     * optimized because gNB MAC will still buffer the packet and UE
-     * would still transmit the HARQ feedback for the first transmission.
+     * When enabled, the maximum number of retransmissions is controlled by
+     * MaxHarqReTx. Disabling retransmissions does not disable HARQ processes
+     * or HARQ feedback.
      *
-     * @param enableFlag If true, it would set the max HARQ ReTx to 3; otherwise it set it to 0
+     * @param enableFlag true to enable HARQ retransmissions; false to disable them
      */
     void EnableHarqReTx(bool enableFlag);
+
     /**
      * @brief Is HARQ ReTx enable function
      *
@@ -1000,12 +999,14 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
      */
     std::map<uint64_t, SlotElem> m_ulAllocationMap;
 
-    bool m_fixedMcsDl{false};  //!< Fixed MCS for *all* UE in DL
-    bool m_fixedMcsUl{false};  //!< Fixed MCS for *all* UE in UL
-    uint8_t m_startMcsDl{0};   //!< Starting (or fixed) value for DL MCS
-    uint8_t m_startMcsUl{0};   //!< Starting (or fixed) value for UL MCS
-    int8_t m_maxDlMcs{0};      //!< Maximum index for DL MCS
-    Time m_cqiTimersThreshold; //!< The time while a CQI is valid
+    bool m_fixedMcsDl{false};    //!< Fixed MCS for *all* UE in DL
+    bool m_fixedMcsUl{false};    //!< Fixed MCS for *all* UE in UL
+    uint8_t m_startMcsDl{0};     //!< Starting (or fixed) value for DL MCS
+    uint8_t m_startMcsUl{0};     //!< Starting (or fixed) value for UL MCS
+    int8_t m_maxDlMcs{0};        //!< Maximum index for DL MCS
+    Time m_cqiTimersThreshold;   //!< The time while a CQI is valid
+    bool m_enableHarqReTx{true}; //!< Whether HARQ retransmissions are enabled
+    uint8_t m_maxHarqReTx{3};    //!< Maximum number of HARQ retransmissions per TB
 
     uint8_t m_rachUlGrantMcs{0}; //!< The MCS that will be used for UL RACH grant
     uint8_t m_ulRachBwpIndex{
@@ -1065,8 +1066,6 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
     TypeId m_schedLcType; //!< Type of the LC scheduling algorithm
 
     uint32_t m_srsSlotCounter{0}; //!< Counter for UL slots
-
-    bool m_enableHarqReTx{true}; //!< Flag to enable or disable HARQ ReTx (attribute)
 
     TracedCallback<uint16_t, uint16_t, const std::shared_ptr<NrMacSchedulerUeInfo>&>
         m_csiFeedbackReceived; //!< Traced callback to access CSI feedback

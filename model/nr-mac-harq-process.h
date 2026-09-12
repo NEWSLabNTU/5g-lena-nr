@@ -59,7 +59,8 @@ struct NR_EXPORT HarqProcess
           m_status(other.m_status),
           m_timer(other.m_timer),
           m_dciElement(other.m_dciElement),
-          m_rlcPduInfo(other.m_rlcPduInfo)
+          m_rlcPduInfo(other.m_rlcPduInfo),
+          m_txAttempts(other.m_txAttempts)
     {
     }
 
@@ -91,6 +92,7 @@ struct NR_EXPORT HarqProcess
         m_timer = 0;
         m_dciElement.reset();
         m_rlcPduInfo.clear();
+        m_txAttempts = 0;
     }
 
     bool m_active{false};      //!< False indicate that the process is not active
@@ -98,6 +100,8 @@ struct NR_EXPORT HarqProcess
     uint8_t m_timer{0};        //!< Timer of the process (in slot)
     std::shared_ptr<DciInfoElementTdma> m_dciElement{}; //!< DCI element
     std::vector<RlcPduInfo> m_rlcPduInfo{};             //!< vector of RLC PDU
+    uint8_t m_txAttempts{0}; //!< Number of transmissions of the current TB, including
+                             //!< the initial one (0 when the process is inactive)
 };
 
 /**

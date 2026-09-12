@@ -194,11 +194,18 @@ NrMacSchedulerNs3::GetTypeId()
                           MakeIntegerAccessor(&NrMacSchedulerNs3::SetMaxDlMcs,
                                               &NrMacSchedulerNs3::GetMaxDlMcs),
                           MakeIntegerChecker<int8_t>(-1, 30))
+            .AddAttribute("MaxHarqReTx",
+                          "Maximum number of HARQ retransmissions per transport block "
+                          "(0 means sent once). Only has effect when EnableHarqReTx is true.",
+                          UintegerValue(3),
+                          MakeUintegerAccessor(&NrMacSchedulerNs3::m_maxHarqReTx),
+                          MakeUintegerChecker<uint8_t>(0, 10))
             .AddAttribute("EnableHarqReTx",
-                          "If true, it would set the max HARQ ReTx to 3; otherwise it set it to 0",
+                          "If false, the scheduler does not retransmit a NACKed transport block. "
+                          "HARQ processes and HARQ feedback continue to operate. If true, the "
+                          "number of retransmissions is bounded by MaxHarqReTx.",
                           BooleanValue(true),
-                          MakeBooleanAccessor(&NrMacSchedulerNs3::EnableHarqReTx,
-                                              &NrMacSchedulerNs3::IsHarqReTxEnable),
+                          MakeBooleanAccessor(&NrMacSchedulerNs3::m_enableHarqReTx),
                           MakeBooleanChecker())
             .AddAttribute(
                 "SchedLcAlgorithmType",
@@ -477,7 +484,7 @@ NrMacSchedulerNs3::EnableHarqReTx(bool enableFlag)
 bool
 NrMacSchedulerNs3::IsHarqReTxEnable() const
 {
-    return m_enableHarqReTx;
+    return m_enableHarqReTx && m_maxHarqReTx > 0;
 }
 
 void
@@ -1161,11 +1168,12 @@ NrMacSchedulerNs3::ProcessHARQFeedbacks(
         }
         NS_ABORT_IF(ueProcess.m_dciElement == nullptr);
 
-        // RV number should not be greater than 3
-        NS_ASSERT(ueProcess.m_dciElement->m_rv < 4);
-        uint8_t maxHarqReTx = m_enableHarqReTx ? 3 : 0;
+        const uint8_t maxReTx = m_enableHarqReTx ? m_maxHarqReTx : 0;
 
-        if (harqFeedbackIt->IsReceivedOk() || ueProcess.m_dciElement->m_rv == maxHarqReTx)
+        NS_ASSERT_MSG(ueProcess.m_txAttempts <= maxReTx + 1,
+                      "Process has exceeded " << +(maxReTx + 1) << " attempts");
+
+        if (harqFeedbackIt->IsReceivedOk() || ueProcess.m_txAttempts > maxReTx)
         {
             ueHarqVector.Erase(harqId);
             harqFeedbackIt = harqInfo->erase(harqFeedbackIt);
@@ -1569,6 +1577,7 @@ NrMacSchedulerNs3::DoScheduleDlData(PointInFTPlane* spoint,
                               << static_cast<uint32_t>(m_macSchedSapUser->GetSymbolsPerSlot()));
 
             HarqProcess harqProcess(true, HarqProcess::WAITING_FEEDBACK, 0, dci);
+            harqProcess.m_txAttempts = 1;
             uint8_t id;
 
             if (!ue.first->m_dlHarq.CanInsert())
@@ -1799,6 +1808,7 @@ NrMacSchedulerNs3::DoScheduleUlData(PointInFTPlane* spoint,
             }
 
             HarqProcess harqProcess(true, HarqProcess::WAITING_FEEDBACK, 0, dci);
+            harqProcess.m_txAttempts = 1;
             uint8_t id;
             ue.first->m_ulHarq.Insert(&id, harqProcess);
 

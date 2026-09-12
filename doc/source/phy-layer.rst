@@ -928,6 +928,11 @@ in between the retransmissions. Also, the SINRs experienced
 on each RB may vary through retransmissions. As such, HARQ affects both the PHY
 and MAC layers.
 
+The redundancy version (RV) field carried in the DCIs and reported in the PHY
+traces is used here as the transmission-attempt index of the HARQ process: it is
+0 for the first transmission and increases by one for each retransmission, rather
+than being restricted to the values 0 to 3.
+
 The 'NR' module supports two HARQ methods: Chase Combining (HARQ-CC)
 and Incremental Redundancy (HARQ-IR).
 
@@ -986,7 +991,7 @@ the specification of the rate matcher in the 3GPP standard [TS38212]_, where
 the algorithm fixes the modulation order for generating the different blocks
 of the redundancy versions.
 
-The 'NR' module supports multiple (20) stop and wait processes to allow continuous data flow. The model is asynchronous for both DL and UL transmissions. The transmissions, feedback, and retransmissions basically depend on the processing timings, the TDD pattern, and the scheduler. We support up to 4 redundancy versions per HARQ process; after which, if combined decoding is not successful, the transport block is dropped.
+The 'NR' module supports multiple (20) stop and wait processes to allow continuous data flow. The model is asynchronous for both DL and UL transmissions. The transmissions, feedback, and retransmissions basically depend on the processing timings, the TDD pattern, and the scheduler. When ``EnableHarqReTx`` is true, the number of retransmissions per HARQ process is bounded by ``MaxHarqReTx``. Setting ``EnableHarqReTx`` to false disables retransmissions regardless of the value of ``MaxHarqReTx``.
 
 
 MIMO

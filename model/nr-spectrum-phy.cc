@@ -1645,9 +1645,10 @@ NrSpectrumPhy::CheckTransportBlockCorruptionStatus()
         // A new transmission (NDI set) must not soft-combine with history left
         // on this HARQ process by an earlier corrupted transport block. Such
         // history can survive process reuse when the retransmission chain ends
-        // without a successful reception or an rv == 3 transmission (e.g.,
-        // with HARQ retransmissions disabled), because those are the only
-        // conditions that otherwise clear it.
+        // without a successful reception (e.g. the chain reaches MaxHarqReTx
+        // and is released, or HARQ retransmissions are disabled), so clearing
+        // it here on NDI = 1 is what guarantees a fresh transport block starts
+        // from an empty soft buffer.
         if (tbInfo.m_expected.m_ndi == 1)
         {
             if (tbInfo.m_expected.m_isDownlink)
@@ -1744,7 +1745,7 @@ NrSpectrumPhy::SendUlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo)
     m_phyUlHarqFeedbackCallback(harqUlInfo);
 
     // Arrange the history
-    if (!tbInfo.m_isCorrupted || tbInfo.m_expected.m_rv == 3)
+    if (!tbInfo.m_isCorrupted)
     {
         m_harqPhyModule.ResetUlHarqProcessStatus(rnti, tbInfo.m_expected.m_harqProcessId);
     }
@@ -1778,7 +1779,7 @@ NrSpectrumPhy::SendDlHarqFeedback(uint16_t rnti, TransportBlockInfo& tbInfo)
     m_phyDlHarqFeedbackCallback(harqDlInfo);
 
     // Arrange the history
-    if (!tbInfo.m_isCorrupted || tbInfo.m_expected.m_rv == 3)
+    if (!tbInfo.m_isCorrupted)
     {
         NS_LOG_DEBUG("Reset Dl process: " << +tbInfo.m_expected.m_harqProcessId << " for RNTI "
                                           << rnti);

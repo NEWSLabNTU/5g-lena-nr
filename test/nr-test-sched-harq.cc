@@ -12,6 +12,9 @@
 #include "ns3/object-factory.h"
 #include "ns3/simulator.h"
 #include "ns3/test.h"
+#include "ns3/uinteger.h"
+
+#include <array>
 
 /**
  * @file nr-test-sched-harq.cc
@@ -562,6 +565,9 @@ NrTestMacSchedulerHarqRrBeamOrder::ScheduleRound(Ptr<NrMacSchedulerNs3> sched,
         harqProcess.m_dciElement = std::make_shared<DciInfoElementTdma>(dci);
         harqProcess.m_active = true;
         harqProcess.m_status = HarqProcess::WAITING_FEEDBACK;
+        // Each round is a fresh first transmission for this beam-ordering test;
+        // reset the attempt counter so it does not accumulate to the retx cap.
+        harqProcess.m_txAttempts = 1;
 
         DlHarqInfo harqInfo;
         harqInfo.m_harqStatus = DlHarqInfo::NACK;
@@ -983,6 +989,443 @@ NrTestMacSchedulerHarqRrOfdmaSharing::DoRun()
     Simulator::Destroy();
 }
 
+constexpr uint16_t RNTI = 1;
+
+constexpr std::array<uint8_t, 5> MAX_RETX_VALUES{0, 1, 3, 5, 10};
+
+/**
+ * @ingroup test
+ * @brief Test that the scheduler bounds HARQ retransmissions by MaxHarqReTx.
+ *
+ * For one direction (DL or UL), the test NACKs a transport block until the
+ * process is released, and checks the number of transmissions, the RV and NDI
+ * of each DCI, and that a new process starts with one attempt, RV 0 and NDI 1.
+ * It also checks that an ACK received before the limit releases the process.
+ * With EnableHarqReTx=false, no retransmission is scheduled regardless of
+ * MaxHarqReTx.
+ */
+class NrHarqRetxSchedulerCase : public TestCase
+{
+  public:
+    /**
+     * Constructor.
+     *
+     * @param maxHarqReTx Value of the MaxHarqReTx attribute.
+     * @param downlink True to test DL, false to test UL.
+     * @param enableHarqReTx Value of the EnableHarqReTx attribute.
+     */
+    NrHarqRetxSchedulerCase(uint8_t maxHarqReTx, bool downlink, bool enableHarqReTx = true)
+        : TestCase(std::string(downlink ? "DL" : "UL") + " MaxHarqReTx=" +
+                   std::to_string(maxHarqReTx) + (enableHarqReTx ? "" : " EnableHarqReTx=false")),
+          m_maxHarqReTx(maxHarqReTx),
+          m_downlink(downlink),
+          m_enableHarqReTx(enableHarqReTx)
+    {
+    }
+
+  private:
+    void DoRun() override;
+
+    Ptr<NrMacSchedulerNs3> CreateScheduler();
+
+    DciInfoElementTdma MakeInitialDci(DciInfoElementTdma::DciFormat format) const;
+
+    void CaptureSchedule(const NrMacSchedSapUser::SchedConfigIndParameters& params);
+
+    void ActivateFreshDlProcess(Ptr<NrMacSchedulerNs3> sched);
+    void ActivateFreshUlProcess(Ptr<NrMacSchedulerNs3> sched);
+    void ActivateFreshProcess(Ptr<NrMacSchedulerNs3> sched);
+
+    void TriggerDlFeedback(Ptr<NrMacSchedulerNs3> sched, bool ack);
+    void TriggerUlFeedback(Ptr<NrMacSchedulerNs3> sched, bool ack);
+    void TriggerFeedback(Ptr<NrMacSchedulerNs3> sched, bool ack);
+
+    HarqProcess& GetProcess(Ptr<NrMacSchedulerNs3> sched) const;
+    void RunDirection();
+
+    uint8_t m_maxHarqReTx;
+    bool m_downlink;
+    bool m_enableHarqReTx;
+
+    TestSchedSapUserHarq* m_schedSapUser{nullptr};
+    TestCschedSapUserHarq* m_cschedSapUser{nullptr};
+
+    std::vector<DciInfoElementTdma> m_scheduledDcis;
+    uint8_t m_harqId{255};
+    SfnSf m_sfn{0, 0, 0, 0};
+};
+
+void
+NrHarqRetxSchedulerCase::CaptureSchedule(const NrMacSchedSapUser::SchedConfigIndParameters& params)
+{
+    for (const auto& varTtiAllocInfo : params.m_slotAllocInfo.m_varTtiAllocInfo)
+    {
+        if (varTtiAllocInfo.m_dci->m_type == DciInfoElementTdma::DATA)
+        {
+            m_scheduledDcis.push_back(*varTtiAllocInfo.m_dci);
+        }
+    }
+}
+
+Ptr<NrMacSchedulerNs3>
+NrHarqRetxSchedulerCase::CreateScheduler()
+{
+    m_schedSapUser = new TestSchedSapUserHarq([this](auto params) { CaptureSchedule(params); });
+    m_cschedSapUser = new TestCschedSapUserHarq();
+
+    auto sched = CreateObject<NrMacSchedulerTdmaRR>();
+
+    sched->InstallDlAmc(CreateObject<NrAmc>());
+    sched->InstallUlAmc(CreateObject<NrAmc>());
+
+    sched->SetMacSchedSapUser(m_schedSapUser);
+    sched->SetMacCschedSapUser(m_cschedSapUser);
+
+    sched->SetAttribute("MaxHarqReTx", UintegerValue(m_maxHarqReTx));
+    sched->SetAttribute("EnableHarqReTx", BooleanValue(m_enableHarqReTx));
+
+    NrMacCschedSapProvider::CschedCellConfigReqParameters cellConfig;
+    cellConfig.m_dlBandwidth = 10;
+    cellConfig.m_ulBandwidth = 10;
+    sched->DoCschedCellConfigReq(cellConfig);
+
+    NrMacCschedSapProvider::CschedUeConfigReqParameters ueConfig{};
+    ueConfig.m_rnti = RNTI;
+    ueConfig.m_transmissionMode = 0;
+    ueConfig.m_beamId = BeamId(0, 0);
+    sched->DoCschedUeConfigReq(ueConfig);
+
+    sched->SetDlCtrlSyms(0);
+    sched->SetUlCtrlSyms(1);
+
+    return sched;
+}
+
+DciInfoElementTdma
+NrHarqRetxSchedulerCase::MakeInitialDci(DciInfoElementTdma::DciFormat format) const
+{
+    DciInfoElementTdma dci(RNTI,
+                           format,
+                           0,
+                           1,
+                           10,
+                           1,
+                           {},
+                           100,
+                           1, // NDI: new transport block
+                           0, // RV: first transmission
+                           DciInfoElementTdma::DATA,
+                           0,
+                           0);
+
+    dci.m_harqProcess = 0;
+
+    dci.m_rbgBitmask = std::vector<bool>(10, false);
+    dci.m_rbgBitmask.at(0) = true;
+
+    return dci;
+}
+
+void
+NrHarqRetxSchedulerCase::ActivateFreshDlProcess(Ptr<NrMacSchedulerNs3> sched)
+{
+    auto& ueInfo = sched->m_ueMap.find(RNTI)->second;
+
+    HarqProcess fresh;
+    fresh.m_dciElement =
+        std::make_shared<DciInfoElementTdma>(MakeInitialDci(DciInfoElementTdma::DL));
+    fresh.m_active = true;
+    fresh.m_status = HarqProcess::WAITING_FEEDBACK;
+    fresh.m_txAttempts = 1;
+
+    uint8_t harqId = 255;
+    const bool inserted = ueInfo->m_dlHarq.Insert(&harqId, fresh);
+
+    NS_TEST_ASSERT_MSG_EQ(inserted, true, "Could not allocate a fresh DL HARQ process");
+    NS_TEST_ASSERT_MSG_NE(harqId, 255, "DL HARQ allocator did not return a valid process ID");
+
+    m_harqId = harqId;
+
+    auto& process = ueInfo->m_dlHarq.Get(m_harqId);
+    process.m_dciElement->m_harqProcess = m_harqId;
+
+    NS_TEST_ASSERT_MSG_EQ(process.m_active, true, "Fresh DL HARQ process is not active");
+    NS_TEST_ASSERT_MSG_EQ(+process.m_txAttempts,
+                          1,
+                          "Fresh DL HARQ process must start at attempt 1");
+    NS_TEST_ASSERT_MSG_EQ(+process.m_dciElement->m_rv,
+                          0,
+                          "Fresh DL HARQ process must start with RV 0");
+    NS_TEST_ASSERT_MSG_EQ(+process.m_dciElement->m_ndi,
+                          1,
+                          "Fresh DL HARQ process must start with NDI 1");
+}
+
+void
+NrHarqRetxSchedulerCase::ActivateFreshUlProcess(Ptr<NrMacSchedulerNs3> sched)
+{
+    auto& ueInfo = sched->m_ueMap.find(RNTI)->second;
+
+    HarqProcess fresh;
+    fresh.m_dciElement =
+        std::make_shared<DciInfoElementTdma>(MakeInitialDci(DciInfoElementTdma::UL));
+    fresh.m_active = true;
+    fresh.m_status = HarqProcess::WAITING_FEEDBACK;
+    fresh.m_txAttempts = 1;
+
+    uint8_t harqId = 255;
+    const bool inserted = ueInfo->m_ulHarq.Insert(&harqId, fresh);
+
+    NS_TEST_ASSERT_MSG_EQ(inserted, true, "Could not allocate a fresh UL HARQ process");
+    NS_TEST_ASSERT_MSG_NE(harqId, 255, "UL HARQ allocator did not return a valid process ID");
+
+    m_harqId = harqId;
+
+    auto& process = ueInfo->m_ulHarq.Get(m_harqId);
+    process.m_dciElement->m_harqProcess = m_harqId;
+
+    NS_TEST_ASSERT_MSG_EQ(process.m_active, true, "Fresh UL HARQ process is not active");
+    NS_TEST_ASSERT_MSG_EQ(+process.m_txAttempts,
+                          1,
+                          "Fresh UL HARQ process must start at attempt 1");
+    NS_TEST_ASSERT_MSG_EQ(+process.m_dciElement->m_rv,
+                          0,
+                          "Fresh UL HARQ process must start with RV 0");
+    NS_TEST_ASSERT_MSG_EQ(+process.m_dciElement->m_ndi,
+                          1,
+                          "Fresh UL HARQ process must start with NDI 1");
+}
+
+void
+NrHarqRetxSchedulerCase::TriggerDlFeedback(Ptr<NrMacSchedulerNs3> sched, bool ack)
+{
+    m_scheduledDcis.clear();
+
+    NrMacSchedSapProvider::SchedDlTriggerReqParameters trigger;
+    trigger.m_snfSf = m_sfn;
+    trigger.m_slotType = LteNrTddSlotType::DL;
+    trigger.m_dlHarqInfoList = {};
+
+    DlHarqInfo feedback;
+    feedback.m_harqStatus = ack ? DlHarqInfo::ACK : DlHarqInfo::NACK;
+    feedback.m_numRetx = 0;
+    feedback.m_rnti = RNTI;
+    feedback.m_harqProcessId = m_harqId;
+    feedback.m_bwpIndex = 0;
+
+    trigger.m_dlHarqInfoList.push_back(feedback);
+
+    sched->DoSchedDlTriggerReq(trigger);
+    m_sfn.Add(1);
+}
+
+void
+NrHarqRetxSchedulerCase::TriggerUlFeedback(Ptr<NrMacSchedulerNs3> sched, bool ack)
+{
+    m_scheduledDcis.clear();
+
+    NrMacSchedSapProvider::SchedUlTriggerReqParameters trigger;
+    trigger.m_snfSf = m_sfn;
+    trigger.m_slotType = LteNrTddSlotType::UL;
+    trigger.m_ulHarqInfoList = {};
+
+    UlHarqInfo feedback;
+    feedback.m_receptionStatus = ack ? UlHarqInfo::Ok : UlHarqInfo::NotOk;
+    feedback.m_rnti = RNTI;
+    feedback.m_harqProcessId = m_harqId;
+    feedback.m_bwpIndex = 0;
+
+    trigger.m_ulHarqInfoList.push_back(feedback);
+
+    sched->DoSchedUlTriggerReq(trigger);
+    m_sfn.Add(1);
+}
+
+void
+NrHarqRetxSchedulerCase::ActivateFreshProcess(Ptr<NrMacSchedulerNs3> sched)
+{
+    if (m_downlink)
+    {
+        ActivateFreshDlProcess(sched);
+    }
+    else
+    {
+        ActivateFreshUlProcess(sched);
+    }
+}
+
+void
+NrHarqRetxSchedulerCase::TriggerFeedback(Ptr<NrMacSchedulerNs3> sched, bool ack)
+{
+    if (m_downlink)
+    {
+        TriggerDlFeedback(sched, ack);
+    }
+    else
+    {
+        TriggerUlFeedback(sched, ack);
+    }
+}
+
+HarqProcess&
+NrHarqRetxSchedulerCase::GetProcess(Ptr<NrMacSchedulerNs3> sched) const
+{
+    auto& ueInfo = sched->m_ueMap.find(RNTI)->second;
+    if (m_downlink)
+    {
+        return ueInfo->m_dlHarq.Get(m_harqId);
+    }
+    return ueInfo->m_ulHarq.Get(m_harqId);
+}
+
+void
+NrHarqRetxSchedulerCase::RunDirection()
+{
+    auto sched = CreateScheduler();
+    const std::string direction = m_downlink ? "DL" : "UL";
+
+    ActivateFreshProcess(sched);
+    auto& process = GetProcess(sched);
+
+    if (!m_enableHarqReTx)
+    {
+        TriggerFeedback(sched, false);
+
+        NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                              0,
+                              direction + " EnableHarqReTx=false produced a retransmission");
+        NS_TEST_ASSERT_MSG_EQ(process.m_active,
+                              false,
+                              direction + " HARQ process was not released");
+
+        ActivateFreshProcess(sched);
+        auto& reusedProcess = GetProcess(sched);
+
+        NS_TEST_ASSERT_MSG_EQ(+reusedProcess.m_txAttempts,
+                              1,
+                              direction + " reused process did not reset attempts");
+        NS_TEST_ASSERT_MSG_EQ(+reusedProcess.m_dciElement->m_rv,
+                              0,
+                              direction + " reused process did not restart at RV 0");
+        NS_TEST_ASSERT_MSG_EQ(+reusedProcess.m_dciElement->m_ndi,
+                              1,
+                              direction + " reused process did not restart with NDI 1");
+
+        delete m_schedSapUser;
+        delete m_cschedSapUser;
+        m_schedSapUser = nullptr;
+        m_cschedSapUser = nullptr;
+        return;
+    }
+
+    for (uint8_t retx = 1; retx <= m_maxHarqReTx; ++retx)
+    {
+        TriggerFeedback(sched, false);
+
+        NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                              1,
+                              direction + " NACK should produce one retransmission DCI");
+
+        const auto& dci = m_scheduledDcis.front();
+
+        NS_TEST_ASSERT_MSG_EQ(+dci.m_rv,
+                              +retx,
+                              direction + " RV does not match transmission attempt");
+        NS_TEST_ASSERT_MSG_EQ(+dci.m_ndi, 0, direction + " retransmission must use NDI 0");
+        NS_TEST_ASSERT_MSG_EQ(+process.m_txAttempts,
+                              +(retx + 1),
+                              direction + " m_txAttempts not incremented correctly");
+        NS_TEST_ASSERT_MSG_EQ(process.m_active,
+                              true,
+                              direction + " HARQ process released before limit");
+    }
+
+    TriggerFeedback(sched, false);
+
+    NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                          0,
+                          direction + " retransmitted after MaxHarqReTx");
+    NS_TEST_ASSERT_MSG_EQ(process.m_active,
+                          false,
+                          direction + " HARQ process not released at limit");
+
+    ActivateFreshProcess(sched);
+    auto& earlyProcess = GetProcess(sched);
+
+    if (m_maxHarqReTx > 0)
+    {
+        TriggerFeedback(sched, false);
+
+        NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                              1,
+                              direction + " first NACK did not retransmit");
+        NS_TEST_ASSERT_MSG_EQ(+m_scheduledDcis.front().m_rv,
+                              1,
+                              direction + " first retransmission must use RV 1");
+        NS_TEST_ASSERT_MSG_EQ(+m_scheduledDcis.front().m_ndi,
+                              0,
+                              direction + " first retransmission must use NDI 0");
+    }
+
+    TriggerFeedback(sched, true);
+
+    NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                          0,
+                          direction + " ACK unexpectedly produced a DCI");
+    NS_TEST_ASSERT_MSG_EQ(earlyProcess.m_active,
+                          false,
+                          direction + " ACK did not release HARQ process");
+
+    ActivateFreshProcess(sched);
+    auto& reusedProcess = GetProcess(sched);
+
+    NS_TEST_ASSERT_MSG_EQ(reusedProcess.m_active,
+                          true,
+                          direction + " released HARQ process could not be reused");
+    NS_TEST_ASSERT_MSG_EQ(+reusedProcess.m_txAttempts,
+                          1,
+                          direction + " reused process did not reset attempts");
+    NS_TEST_ASSERT_MSG_EQ(+reusedProcess.m_dciElement->m_rv,
+                          0,
+                          direction + " reused process did not restart at RV 0");
+    NS_TEST_ASSERT_MSG_EQ(+reusedProcess.m_dciElement->m_ndi,
+                          1,
+                          direction + " reused process did not restart with NDI 1");
+
+    TriggerFeedback(sched, false);
+
+    if (m_maxHarqReTx > 0)
+    {
+        NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                              1,
+                              direction + " reused process was not schedulable");
+        NS_TEST_ASSERT_MSG_EQ(+m_scheduledDcis.front().m_rv,
+                              1,
+                              direction + " reused process did not advance to RV 1");
+    }
+    else
+    {
+        NS_TEST_ASSERT_MSG_EQ(m_scheduledDcis.size(),
+                              0,
+                              direction + " MaxHarqReTx=0 produced a retransmission");
+        NS_TEST_ASSERT_MSG_EQ(reusedProcess.m_active,
+                              false,
+                              direction + " MaxHarqReTx=0 process was not released");
+    }
+
+    delete m_schedSapUser;
+    delete m_cschedSapUser;
+    m_schedSapUser = nullptr;
+    m_cschedSapUser = nullptr;
+}
+
+void
+NrHarqRetxSchedulerCase::DoRun()
+{
+    RunDirection();
+    Simulator::Destroy();
+}
+
 class NrTestSchedHarqSuite : public TestSuite
 {
   public:
@@ -996,6 +1439,16 @@ class NrTestSchedHarqSuite : public TestSuite
                     Duration::QUICK);
         AddTestCase(new NrTestMacSchedulerHarqRrOfdmaSharing(true /* consolidated */),
                     Duration::QUICK);
+
+        // MaxHarqReTx cases.
+        for (const auto maxHarqReTx : MAX_RETX_VALUES)
+        {
+            AddTestCase(new NrHarqRetxSchedulerCase(maxHarqReTx, true), Duration::QUICK);
+            AddTestCase(new NrHarqRetxSchedulerCase(maxHarqReTx, false), Duration::QUICK);
+        }
+
+        AddTestCase(new NrHarqRetxSchedulerCase(5, true, false), Duration::QUICK);
+        AddTestCase(new NrHarqRetxSchedulerCase(5, false, false), Duration::QUICK);
 
         // clang-format off
         using DIET = DciInfoElementTdma;
