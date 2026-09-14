@@ -465,6 +465,7 @@ set(test_sources
     test/nr-antenna-3gpp-model-conf.cc
     test/nr-cc-bwp-configuration.cc
     test/nr-channel-setup-test.cc
+    test/nr-colocated-ue-fairness-test.cc
     test/nr-epc-test-gtpu.cc
     test/nr-epc-test-s1u-downlink.cc
     test/nr-epc-test-s1u-uplink.cc
