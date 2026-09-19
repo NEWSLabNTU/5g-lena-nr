@@ -71,6 +71,9 @@ Bugs fixed
   with no entry in the logical channel map; the next uplink grant selected it and
   ``SendNewStatusData()``, ``SendRetxData()`` or ``SendTxData()`` threw while
   looking it up. Such reports are now discarded when they arrive.
+- ``NrMacSchedulerTdma::DoReshapeAllocation()`` could loop without terminating when
+  reshaping a HARQ retransmission whose resource count exceeded the range of its
+  symbol counter, which is reachable at wide bandwidths.
 
 Release NR-v5.1
 ---------------

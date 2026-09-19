@@ -529,6 +529,7 @@ set(test_sources
     test/nr-test-sched-lc.cc
     test/nr-test-sched-msg3-retx.cc
     test/nr-test-sched-ofdma-frequency-domain.cc
+    test/nr-test-sched-reshape.cc
     test/nr-test-sched-symbols-per-beam.cc
     test/nr-test-sched-temporal-fairness.cc
     test/nr-test-sched.cc

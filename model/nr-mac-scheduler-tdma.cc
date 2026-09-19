@@ -709,36 +709,49 @@ NrMacSchedulerTdma::DoReshapeAllocation(
             }
         }
 
-        // Compute the number of required symbols
-        uint8_t minSymbols = ceil((double)numResources / allocatedRbgs.size());
-
-        // Remove RBGs or increase number of symbols until we match the number of resources
-        uint32_t currResources = minSymbols * allocatedRbgs.size();
-        while ((numResources != currResources) && (!allocatedRbgs.empty()))
+        // Empty allocations cannot be reshaped and would cause division by zero below.
+        if (allocatedRbgs.empty() || numResources == 0)
         {
-            if (currResources < numResources)
-            {
-                minSymbols += 1;
-            }
-            else if (currResources > numResources)
-            {
-                allocatedRbgs.pop_back();
-            }
-            currResources = minSymbols * allocatedRbgs.size();
+            continue;
         }
 
-        if (minSymbols <= availableSymbols && currResources == numResources)
+        // Find the smallest symbol count that preserves the resource count using the available
+        // resource block groups. If no shape fits in this slot, leave the HARQ process buffered.
+        // Bound the search by availableSymbols: the former uint8_t counter could wrap at 256
+        // before reaching an exact match and repeat indefinitely.
+        const std::size_t minSymbols =
+            (numResources + allocatedRbgs.size() - 1) / allocatedRbgs.size();
+        std::size_t selectedSymbols = 0;
+        std::size_t selectedRbgs = 0;
+        for (std::size_t symbols = minSymbols; symbols <= availableSymbols; ++symbols)
         {
+            if (numResources % symbols == 0)
+            {
+                const std::size_t rbgs = numResources / symbols;
+                if (rbgs <= allocatedRbgs.size())
+                {
+                    selectedSymbols = symbols;
+                    selectedRbgs = rbgs;
+                    break;
+                }
+            }
+        }
+
+        if (selectedSymbols != 0)
+        {
+            // selectedSymbols <= availableSymbols by construction, so the narrowing is safe
+            const auto symbols = static_cast<uint8_t>(selectedSymbols);
+            allocatedRbgs.resize(selectedRbgs);
             std::vector<bool> allocatedBitmask(bitmask.size(), false);
             for (auto rbg : allocatedRbgs)
             {
                 allocatedBitmask.at(rbg) = true;
             }
             // Update DCI after reshaping
-            reshapedDcis.emplace_back(startingSymbol, minSymbols, allocatedBitmask, dci);
-            availableSymbols -= minSymbols;
-            startingSymbol += minSymbols;
-            numSymbols -= minSymbols;
+            reshapedDcis.emplace_back(startingSymbol, symbols, allocatedBitmask, dci);
+            availableSymbols -= symbols;
+            startingSymbol += symbols;
+            numSymbols -= symbols;
         }
     }
     return reshapedDcis;
