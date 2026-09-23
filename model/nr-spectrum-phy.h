@@ -721,7 +721,7 @@ class NR_EXPORT NrSpectrumPhy : public SpectrumPhy
      */
     void EndRxCtrl();
     /**
-     * @brief Function that is celled when the spectrum phy finishes the reception of SRS.
+     * @brief Function that is called when the spectrum phy finishes the reception of SRS.
      * It stores SRS message, calls the interference calculator to notify the end of the
      * reception which will trigger SRS SINR calculation, and it also updates the spectrum phy
      * state.
