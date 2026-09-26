@@ -969,9 +969,11 @@ void
 NrGnbPhy::RetrievePrepareEncodeCtrlMsgs()
 {
     NS_LOG_FUNCTION(this);
+    // Keep the order in which the messages were produced (queued messages
+    // such as MIB and SIB1 first, then DL and UL DCIs); sorting Ptr lists
+    // orders them by heap address, which differs from run to run
     auto ctrlMsgs = PopCurrentSlotCtrlMsgs();
-    ctrlMsgs.sort();
-    ctrlMsgs.merge(RetrieveMsgsFromDCIs(m_currentSlot));
+    ctrlMsgs.splice(ctrlMsgs.end(), RetrieveMsgsFromDCIs(m_currentSlot));
 
     if (m_netDevice != nullptr)
     {
@@ -1310,7 +1312,6 @@ NrGnbPhy::RetrieveDciFromAllocation(const SlotAllocInfo& alloc,
             ctrlMsgs.push_back(msg);
         }
     }
-    ctrlMsgs.sort();
     return ctrlMsgs;
 }
 
@@ -1333,19 +1334,21 @@ NrGnbPhy::RetrieveMsgsFromDCIs(const SfnSf& currentSlot)
         {
             NS_LOG_DEBUG(" in slot " << currentSlot << " send DL DCI for the same slot");
 
-            ctrlMsgs.merge(RetrieveDciFromAllocation(m_currSlotAllocInfo,
-                                                     DciInfoElementTdma::DL,
-                                                     k0delay,
-                                                     k1delay));
+            ctrlMsgs.splice(ctrlMsgs.end(),
+                            RetrieveDciFromAllocation(m_currSlotAllocInfo,
+                                                      DciInfoElementTdma::DL,
+                                                      k0delay,
+                                                      k1delay));
         }
         else if (SlotAllocInfoExists(targetSlot))
         {
             NS_LOG_DEBUG(" in slot " << currentSlot << " send DL DCI for " << targetSlot);
 
-            ctrlMsgs.merge(RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
-                                                     DciInfoElementTdma::DL,
-                                                     k0delay,
-                                                     k1delay));
+            ctrlMsgs.splice(ctrlMsgs.end(),
+                            RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
+                                                      DciInfoElementTdma::DL,
+                                                      k0delay,
+                                                      k1delay));
         }
         else
         {
@@ -1363,26 +1366,27 @@ NrGnbPhy::RetrieveMsgsFromDCIs(const SfnSf& currentSlot)
         {
             NS_LOG_DEBUG(" in slot " << currentSlot << " send UL DCI for the same slot");
 
-            ctrlMsgs.merge(RetrieveDciFromAllocation(m_currSlotAllocInfo,
-                                                     DciInfoElementTdma::UL,
-                                                     k2delay,
-                                                     k1delay));
+            ctrlMsgs.splice(ctrlMsgs.end(),
+                            RetrieveDciFromAllocation(m_currSlotAllocInfo,
+                                                      DciInfoElementTdma::UL,
+                                                      k2delay,
+                                                      k1delay));
         }
         else if (SlotAllocInfoExists(targetSlot))
         {
             NS_LOG_DEBUG(" in slot " << currentSlot << " send UL DCI for " << targetSlot);
 
-            ctrlMsgs.merge(RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
-                                                     DciInfoElementTdma::UL,
-                                                     k2delay,
-                                                     k1delay));
+            ctrlMsgs.splice(ctrlMsgs.end(),
+                            RetrieveDciFromAllocation(PeekSlotAllocInfo(targetSlot),
+                                                      DciInfoElementTdma::UL,
+                                                      k2delay,
+                                                      k1delay));
         }
         else
         {
             NS_LOG_DEBUG("No allocation found for slot " << targetSlot);
         }
     }
-    ctrlMsgs.sort();
     return ctrlMsgs;
 }
 
