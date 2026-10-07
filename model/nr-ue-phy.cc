@@ -1127,6 +1127,9 @@ NrUePhy::UlCtrl(const std::shared_ptr<DciInfoElementTdma>& dci)
                           << (Simulator::Now() + varTtiDuration - NanoSeconds(1.0))
                           << " but no data to transmit");
         m_cam->Cancel();
+        // The grant covers this slot only; left GRANTED, the next slot
+        // requests no access and an SRS there leaves its UL CTRL unsent
+        ChannelAccessDenied();
         return varTtiDuration;
     }
     else if (m_channelStatus != GRANTED)
