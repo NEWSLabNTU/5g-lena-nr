@@ -147,6 +147,7 @@ def main(argv=None) -> int:
         # Blocked by server, but works
         "https://medium.com/humans-create-software/composition-over-inheritance-cb6f88070205",
         "https://doi.org/10.1145/3592149.3592159",
+        "https://stackoverflow.com/questions/29403100/how-to-remove-the-box-around-the-code-block-in-restructuredtext-with-sphinx",
         # Kept for historical reasons
         "https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line",
         "https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html",
