@@ -26,6 +26,8 @@ if shutil.which("git") is None:
 # Define global variables
 CTTC_LENA_NR_REPOSITORY = "https://gitlab.com/cttc-lena/nr"
 COMMIT_STYLE_REGEX = r"^([a-z0-9\-\*]+(?:, [a-z0-9\-\*]+)*):((?: \(\w+ #\d+\))?) ([A-Z][^\n]*$)"
+# Files ignored when deriving the expected commit prefix
+PREFIX_EXEMPT_FILES = {"CHANGES.md"}
 
 
 # Get all file names without extension
@@ -230,7 +232,11 @@ class CheckPrefix(BaseCheck):
         return [c.strip() for c in raw.split(",") if c.strip()]
 
     def _changed_paths(self, commit_info):
-        return list(commit_info.commit.stats.files.keys())
+        paths = list(commit_info.commit.stats.files.keys())
+        # CHANGES.md entries accompany code changes, so they do not count
+        # towards the prefix unless CHANGES.md is the only file touched
+        other_paths = [p for p in paths if p not in PREFIX_EXEMPT_FILES]
+        return other_paths if other_paths else paths
 
     @staticmethod
     def _basename_without_ext(path):
@@ -337,7 +343,9 @@ class CheckPrefix(BaseCheck):
             "(the bare 'nr-*' wildcard is collapsed to 'nr').\n"
             "   2.Commits touching more than 3 distinct files, or for which no "
             "filename-based prefix fits within 40 characters, should use their "
-            "closest common parent directory as a prefix."
+            "closest common parent directory as a prefix.\n"
+            "   3.CHANGES.md is ignored when determining the prefix, unless it is "
+            "the only file touched by the commit."
         )
         return msg
 

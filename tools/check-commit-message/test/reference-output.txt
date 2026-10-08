@@ -35,8 +35,9 @@ Checked rule: commit should match the format style 'nr: (fixes #1) Correct commi
 		prefix contains upper case letters
 Commits that failed check 'CheckPrefix'
   Checked rules:
-   1.Commits touching up to 3 distinct files should use their lowercase, extension-less names as the prefix, provided that the resulting prefix is at most 40 characters long. When those names share a common prefix, a single '<common-prefix>-*' wildcard is also allowed.
+   1.Commits touching up to 3 distinct files should use their lowercase, extension-less names as the prefix, provided that the resulting prefix is at most 40 characters long. When those names share a common prefix, a single '<common-prefix>-*' wildcard is also allowed (the bare 'nr-*' wildcard is collapsed to 'nr').
    2.Commits touching more than 3 distinct files, or for which no filename-based prefix fits within 40 characters, should use their closest common parent directory as a prefix.
+   3.CHANGES.md is ignored when determining the prefix, unless it is the only file touched by the commit.
   Commit with Message: 'FEATURES2: Change the structure (Initial Bils idea) not to collide'
   	Error: incorrect format style. See MatchesFormatCheck results.
   Commit with Message: '7, 8, 9, 10: Borked commit'
