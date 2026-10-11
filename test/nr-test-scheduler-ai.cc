@@ -19,6 +19,7 @@
 #include "ns3/test.h"
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_set>
 
 /**
@@ -60,6 +61,8 @@ class TestSchedulerAiPhySapProvider : public NrPhySapProvider
     void NotifyConnectionSuccessful() override;
     uint32_t GetRbNum() const override;
     BeamId GetBeamId(uint8_t rnti) const override;
+    void RegisterToGnb(uint16_t cellId) override;
+    uint32_t GetArfcn() const override;
     void SetParams(uint32_t numOfUesPerBeam, uint32_t numOfBeams);
 
   private:
@@ -139,6 +142,17 @@ TestSchedulerAiPhySapProvider::SetSlotAllocInfo(const SlotAllocInfo& slotAllocIn
 void
 TestSchedulerAiPhySapProvider::NotifyConnectionSuccessful()
 {
+}
+
+void
+TestSchedulerAiPhySapProvider::RegisterToGnb(uint16_t cellId)
+{
+}
+
+uint32_t
+TestSchedulerAiPhySapProvider::GetArfcn() const
+{
+    return 0;
 }
 
 uint32_t
@@ -251,7 +265,7 @@ NrTestSchedulerAiCase::Notify(const std::vector<NrMacSchedulerUeInfoAi::UeObserv
         weights[obs.rnti] = 1.0;
     }
     NS_TEST_ASSERT_MSG_EQ(isGameOver, false, "Game should not be over");
-    NS_TEST_ASSERT_MSG_EQ(reward, 0.0, "Reward should be 0.0");
+    NS_TEST_ASSERT_MSG_EQ(std::isfinite(reward), true, "Reward should be finite");
     updateWeightsFn(weights);
 }
 

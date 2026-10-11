@@ -51,7 +51,7 @@ NrMacSchedulerAiNs3GymEnv::GetActionSpace()
     float high = 1.0;
     std::vector<uint32_t> shape = {m_numUes};
     std::string dtype = TypeNameGet<float>();
-    return Create<OpenGymBoxSpace>(low, high, shape, dtype);
+    return CreateObject<OpenGymBoxSpace>(low, high, shape, dtype);
 }
 
 Ptr<OpenGymSpace>
@@ -65,7 +65,7 @@ NrMacSchedulerAiNs3GymEnv::GetObservationSpace()
         4,
     };
     std::string dtype = TypeNameGet<float>();
-    return Create<OpenGymBoxSpace>(low, high, shape, dtype);
+    return CreateObject<OpenGymBoxSpace>(low, high, shape, dtype);
 }
 
 bool

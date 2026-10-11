@@ -114,12 +114,14 @@ class PPO:
 
             @param state: The state of the environment, usually a multi-dimensional array (e.g., (3, 4)).
             @param mask: Boolean mask indicating which rows are active.
-            @return Tuple containing the selected action and the log-probability of that action.
+            @return Tuple containing the selected action, the log-probability of that action, and the
+                    temperature used to sample it.
             """
             state = state.unsqueeze(0)
             mask = mask.unsqueeze(0)
 
-            logits = self.actor(state) / self.temperature
+            temperature = self.temperature
+            logits = self.actor(state) / temperature
             action_probs = torch.softmax(logits, dim=-1) * mask
             action_probs = torch.clamp(action_probs, min=1e-8)
             action_probs = action_probs / (action_probs.sum(dim=-1, keepdim=True) + 1e-8)
@@ -132,18 +134,21 @@ class PPO:
 
             self.temperature = max(0.1, self.temperature * 0.999)
 
-            return action.item(), distribution.log_prob(action)
+            return action.item(), distribution.log_prob(action).squeeze(0), temperature
 
-        def evaluate(self, state, action, mask):
+        def evaluate(self, state, action, mask, temperature):
             """!
             Evaluates the state and action to compute log-probabilities, state values, and entropy.
 
             @param state: The state from the environment, potentially batch-processed.
             @param action: The action taken by the agent.
             @param mask: Boolean mask indicating which rows are active.
+            @param temperature: The temperature each action was sampled with, one row per state.
             @return Tuple containing the log-probabilities of the actions, the state values (critic), and the entropy.
             """
-            action_probs = self.actor(state) * mask
+            logits = self.actor(state) / temperature
+            action_probs = torch.softmax(logits, dim=-1) * mask
+            action_probs = torch.clamp(action_probs, min=1e-8)
             action_probs = action_probs / (action_probs.sum(dim=-1, keepdim=True) + 1e-8)
             distribution = torch.distributions.Categorical(action_probs)
 
@@ -168,9 +173,10 @@ class PPO:
 
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
         mask = torch.tensor(mask, dtype=torch.float32, device=self.device)
-        action, action_logprob = self.policy_old.act(state, mask)
+        action, action_logprob, temperature = self.policy_old.act(state, mask)
         memory.actions.append(action)
         memory.logprobs.append(action_logprob.detach())
+        memory.temperatures.append(temperature)
 
         return action
 
@@ -196,11 +202,16 @@ class PPO:
         old_masks = torch.tensor(np.array(memory.mask), dtype=torch.float32, device=self.device)
         old_actions = torch.tensor(memory.actions, dtype=torch.long, device=self.device)
         old_logprobs = torch.stack(list(memory.logprobs)).to(self.device)
+        # The sampling temperature decays at every action and is not part of the state dict, so
+        # evaluate each action with the temperature it was sampled with
+        old_temperatures = torch.tensor(
+            list(memory.temperatures), dtype=torch.float32, device=self.device
+        ).unsqueeze(-1)
 
         for _ in range(self.k_epochs):
             # Get new log_probs, state_values, entropy from current policy
             logprobs, state_values, dist_entropy = self.policy.evaluate(
-                old_states, old_actions, old_masks
+                old_states, old_actions, old_masks, old_temperatures
             )
 
             # Compute PPO objective
@@ -245,6 +256,7 @@ class Memory:
         self.rewards = deque(maxlen=maxlen)
         self.is_terminals = deque(maxlen=maxlen)
         self.mask = deque(maxlen=maxlen)
+        self.temperatures = deque(maxlen=maxlen)
 
     def clear_memory(self):
         """!
@@ -258,6 +270,7 @@ class Memory:
         self.rewards.clear()
         self.is_terminals.clear()
         self.mask.clear()
+        self.temperatures.clear()
 
 
 def debug(msg, debug_flag):
