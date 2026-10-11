@@ -184,9 +184,18 @@ class TestNotchingGnbMac : public NrGnbMac
     void DoSchedConfigIndication(NrMacSchedSapUser::SchedConfigIndParameters ind) override;
     void SetVerbose(bool verbose);
 
+    /**
+     * @return the number of data DCIs checked against the mask
+     */
+    uint32_t GetNumCheckedDcis() const
+    {
+        return m_numCheckedDcis;
+    }
+
   private:
     std::vector<bool> m_inputMask;
     bool m_verboseMac = false;
+    uint32_t m_numCheckedDcis{0}; //!< Number of data DCIs checked against the mask
 };
 
 NS_OBJECT_ENSURE_REGISTERED(TestNotchingGnbMac);
@@ -224,7 +233,9 @@ TestNotchingGnbMac::DoSchedConfigIndication(NrMacSchedSapUser::SchedConfigIndPar
 
     for (auto& varTtiAllocInfo : ind.m_slotAllocInfo.m_varTtiAllocInfo)
     {
-        if (varTtiAllocInfo.m_dci->m_rnti == 0)
+        // Only data DCIs carry an RBG mask to check: skip control and SRS DCIs
+        if (varTtiAllocInfo.m_dci->m_rnti == 0 ||
+            varTtiAllocInfo.m_dci->m_type != DciInfoElementTdma::DATA)
         {
             continue;
         }
@@ -241,6 +252,8 @@ TestNotchingGnbMac::DoSchedConfigIndication(NrMacSchedSapUser::SchedConfigIndPar
                       << " with mask: " << oss.str() << std::endl;
         }
 
+        // Count the DCIs, so that the test fails if nothing was checked
+        m_numCheckedDcis++;
         NS_ASSERT_MSG(varTtiAllocInfo.m_dci->m_rbgBitmask.size() == m_inputMask.size(),
                       "dci bitmask is not of same size as the mask");
 
@@ -326,6 +339,9 @@ NrNotchingTestCase::CreateMac(Ptr<NrMacSchedulerNs3>& scheduler,
                               NrMacCschedSapProvider::CschedCellConfigReqParameters& params) const
 {
     Ptr<TestNotchingGnbMac> mac = CreateObject<TestNotchingGnbMac>(m_mask);
+    // 1 RB per RBG, as the masks assume.
+    // Without it the TBS is 0 and the scheduler creates no data DCI.
+    mac->SetNumRbPerRbg(1);
 
     mac->SetNrMacSchedSapProvider(scheduler->GetMacSchedSapProvider());
     mac->SetNrMacCschedSapProvider(scheduler->GetMacCschedSapProvider());
@@ -426,6 +442,9 @@ NrNotchingTestCase::DoRun()
     paramsDlTrigger.m_snfSf = SfnSf(0, 0, 0, 0);
     paramsDlTrigger.m_slotType = LteNrTddSlotType::DL;
     sched->DoSchedDlTriggerReq(paramsDlTrigger);
+
+    // Fails if no data DCI was scheduled, which would make the test vacuous
+    NS_TEST_EXPECT_MSG_GT(mac->GetNumCheckedDcis(), 0, "No data allocation was checked");
 
     delete m_phySapProvider;
     Simulator::Destroy();
