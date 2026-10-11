@@ -777,7 +777,7 @@ NrMacSchedulerOfdma::CreateDlDci(NrMacSchedulerNs3::PointInFTPlane* spoint,
         return nullptr;
     }
 
-    const auto rbgBitmask = CreateRbgBitmaskFromAllocatedRbgs(ueInfo->m_dlRBG);
+    const auto rbgBitmask = CreateRbgBitmaskFromAllocatedRbgs(ueInfo->m_dlRBG, true);
     std::ostringstream oss;
     for (const auto& x : rbgBitmask)
     {
@@ -833,7 +833,7 @@ NrMacSchedulerOfdma::CreateUlDci(PointInFTPlane* spoint,
     }
 
     uint32_t RBGNum = ueInfo->m_ulRBG.size() / maxSym;
-    const auto rbgBitmask = CreateRbgBitmaskFromAllocatedRbgs(ueInfo->m_ulRBG);
+    const auto rbgBitmask = CreateRbgBitmaskFromAllocatedRbgs(ueInfo->m_ulRBG, false);
 
     NS_LOG_INFO("UE " << ueInfo->m_rnti << " assigned RBG from " << spoint->m_rbg << " to "
                       << spoint->m_rbg + RBGNum << " for " << static_cast<uint32_t>(maxSym)
@@ -893,10 +893,10 @@ NrMacSchedulerOfdma::GetTpc() const
 }
 
 std::vector<bool>
-NrMacSchedulerOfdma::CreateRbgBitmaskFromAllocatedRbgs(
-    const std::vector<uint16_t>& allocatedRbgs) const
+NrMacSchedulerOfdma::CreateRbgBitmaskFromAllocatedRbgs(const std::vector<uint16_t>& allocatedRbgs,
+                                                       bool isDl) const
 {
-    std::vector<bool> rbgNotchedBitmask = GetDlNotchedRbgMask();
+    std::vector<bool> rbgNotchedBitmask = isDl ? GetDlNotchedRbgMask() : GetUlNotchedRbgMask();
     if (rbgNotchedBitmask.empty())
     {
         rbgNotchedBitmask = std::vector<bool>(GetBandwidthInRbg(), true);

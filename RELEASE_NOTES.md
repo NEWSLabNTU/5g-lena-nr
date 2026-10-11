@@ -97,6 +97,9 @@ Bugs fixed
   the same SINR the error model uses, so the scheduler sees the receive combining
   and interference rejection gain of multi-port gNBs. Covered by the new
   ``nr-ul-mimo-cqi`` and ``nr-ul-mimo-cqi-wiring`` (built with Eigen) test suites.
+- Fixed ``NrMacSchedulerOfdma`` checking uplink allocations against the downlink
+  notch mask when creating UL DCIs. They are now checked against the uplink one.
+  Covered by new UL cases of the ``nr-test-notching`` test suite.
 
 Release NR-v5.1
 ---------------

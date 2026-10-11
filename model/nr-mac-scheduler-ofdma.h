@@ -127,10 +127,11 @@ class NR_EXPORT NrMacSchedulerOfdma : public NrMacSchedulerTdma
     /**
      * @brief Create RBG bitmask from allocated RBG vector
      * @param allocatedRbgs vector of allocated RBGs
+     * @param isDl true to check the allocation against the DL notch mask, false for the UL one
      * @return RBG bitmask
      */
-    std::vector<bool> CreateRbgBitmaskFromAllocatedRbgs(
-        const std::vector<uint16_t>& allocatedRbgs) const;
+    std::vector<bool> CreateRbgBitmaskFromAllocatedRbgs(const std::vector<uint16_t>& allocatedRbgs,
+                                                        bool isDl) const;
 
     /**
      * @brief Advances schedInfoIt iterator to the next UE to be scheduled

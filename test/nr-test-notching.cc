@@ -14,6 +14,7 @@
 #include "ns3/test.h"
 
 #include <algorithm>
+#include <functional>
 
 /**
  * @file nr-test-notching.cc
@@ -287,17 +288,21 @@ class NrNotchingTestCase : public TestCase
      * @param schedulerType The type of the scheduler to be tested
      * @param numOfUesPerBeam The number of UEs per beam to be tested
      * @param beamsNum The number beams to be tested
+     * @param isUl If true, test UL allocations against the UL mask, with a DL mask that
+     * notches the RBGs the UL mask allows
      */
     NrNotchingTestCase(const std::string& name,
                        const std::vector<bool>& mask,
                        const std::string& schedulerType,
                        uint32_t numOfUesPerBeam,
-                       uint32_t beamsNum)
+                       uint32_t beamsNum,
+                       bool isUl = false)
         : TestCase(name),
           m_mask(mask),
           m_schedulerType(schedulerType),
           m_numOfUesPerBeam(numOfUesPerBeam),
-          m_beamsNum(beamsNum)
+          m_beamsNum(beamsNum),
+          m_isUl(isUl)
     {
     }
 
@@ -315,6 +320,7 @@ class NrNotchingTestCase : public TestCase
     const std::string m_schedulerType;
     uint32_t m_numOfUesPerBeam;
     uint32_t m_beamsNum;
+    bool m_isUl; //!< Whether UL allocations are tested
     TestNotchingPhySapProvider* m_phySapProvider;
 };
 
@@ -347,7 +353,18 @@ NrNotchingTestCase::CreateMac(Ptr<NrMacSchedulerNs3>& scheduler,
     mac->SetNrMacCschedSapProvider(scheduler->GetMacCschedSapProvider());
     scheduler->SetMacSchedSapUser(mac->GetNrMacSchedSapUser());
     scheduler->SetMacCschedSapUser(mac->GetNrMacCschedSapUser());
-    scheduler->SetDlNotchedRbgMask(m_mask);
+    if (m_isUl)
+    {
+        // Notch in DL exactly the RBGs that the UL mask allows.
+        // UL DCIs checked against the DL mask would then hit notched RBGs.
+        std::vector<bool> dlMask(m_mask.size());
+        std::transform(m_mask.begin(), m_mask.end(), dlMask.begin(), std::logical_not<>());
+        scheduler->SetDlNotchedRbgMask(dlMask);
+    }
+    else
+    {
+        scheduler->SetDlNotchedRbgMask(m_mask);
+    }
     scheduler->SetUlNotchedRbgMask(m_mask);
     // Config sched
     scheduler->DoCschedCellConfigReq(params);
@@ -373,6 +390,8 @@ NrNotchingTestCase::DoRun()
 
     Ptr<NrAmc> amc = CreateObject<NrAmc>();
     sched->InstallDlAmc(amc);
+    // The UL scheduler needs its own AMC to compute UL TBSs
+    sched->InstallUlAmc(CreateObject<NrAmc>());
 
     // uint32_t rbPerRbg = mac->GetNumRbPerRbg ();
     // std::cout << "numRbPerRbg: " << rbPerRbg << std::endl;
@@ -414,7 +433,9 @@ NrNotchingTestCase::DoRun()
             nr::LogicalChannelConfigListElement_s lc;
             lc.m_logicalChannelIdentity = 1;
             lc.m_logicalChannelGroup = 2;
-            lc.m_direction = nr::LogicalChannelConfigListElement_s::DIR_DL;
+            // The logical channel carries data in the tested direction
+            lc.m_direction = m_isUl ? nr::LogicalChannelConfigListElement_s::DIR_UL
+                                    : nr::LogicalChannelConfigListElement_s::DIR_DL;
             lc.m_qosBearerType = nr::LogicalChannelConfigListElement_s::QBT_NON_GBR;
             lc.m_fiveQi = 9;
             paramsLc.m_logicalChannelConfigList.emplace_back(lc);
@@ -431,17 +452,43 @@ NrNotchingTestCase::DoRun()
             paramsDlRlc.m_rlcTransmissionQueueHolDelay = 0;
             paramsDlRlc.m_rlcTransmissionQueueSize = 1284;
 
-            sched->DoSchedDlRlcBufferReq(paramsDlRlc);
+            if (m_isUl)
+            {
+                // UL data is announced by a BSR, here 30 bytes in LCG 2
+                NrMacSchedSapProvider::SchedUlMacCtrlInfoReqParameters bsrParams;
+                MacCeElement bsr;
+                bsr.m_rnti = rntiCnt;
+                bsr.m_macCeType = MacCeElement::BSR;
+                bsr.m_macCeValue.m_bufferStatus = {0, 0, 30, 0};
+                bsrParams.m_macCeList.push_back(bsr);
+                sched->DoSchedUlMacCtrlInfoReq(bsrParams);
+            }
+            else
+            {
+                // DL data is queued at the RLC
+                sched->DoSchedDlRlcBufferReq(paramsDlRlc);
+            }
 
             rntiCnt++;
         }
     }
 
-    // Call scheduling
-    NrMacSchedSapProvider::SchedDlTriggerReqParameters paramsDlTrigger;
-    paramsDlTrigger.m_snfSf = SfnSf(0, 0, 0, 0);
-    paramsDlTrigger.m_slotType = LteNrTddSlotType::DL;
-    sched->DoSchedDlTriggerReq(paramsDlTrigger);
+    // Call scheduling for one slot in the tested direction.
+    // The MAC checks the DCIs against the mask when the slot is reported.
+    if (m_isUl)
+    {
+        NrMacSchedSapProvider::SchedUlTriggerReqParameters paramsUlTrigger;
+        paramsUlTrigger.m_snfSf = SfnSf(0, 0, 0, 0);
+        paramsUlTrigger.m_slotType = LteNrTddSlotType::UL;
+        sched->DoSchedUlTriggerReq(paramsUlTrigger);
+    }
+    else
+    {
+        NrMacSchedSapProvider::SchedDlTriggerReqParameters paramsDlTrigger;
+        paramsDlTrigger.m_snfSf = SfnSf(0, 0, 0, 0);
+        paramsDlTrigger.m_slotType = LteNrTddSlotType::DL;
+        sched->DoSchedDlTriggerReq(paramsDlTrigger);
+    }
 
     // Fails if no data DCI was scheduled, which would make the test vacuous
     NS_TEST_EXPECT_MSG_GT(mac->GetNumCheckedDcis(), 0, "No data allocation was checked");
@@ -498,6 +545,21 @@ class NrNotchingTestSuite : public TestSuite
                                                            schedName.str(),
                                                            uesPerBeam,
                                                            beam),
+                                    Duration::QUICK);
+                        // Same cases in UL, with the DL mask notching the UL-allowed RBGs
+                        AddTestCase(new NrNotchingTestCase("UL" + ss.str(),
+                                                           notchedMask1,
+                                                           schedName.str(),
+                                                           uesPerBeam,
+                                                           beam,
+                                                           true),
+                                    Duration::QUICK);
+                        AddTestCase(new NrNotchingTestCase("UL" + ss.str(),
+                                                           notchedMask2,
+                                                           schedName.str(),
+                                                           uesPerBeam,
+                                                           beam,
+                                                           true),
                                     Duration::QUICK);
                     }
                 }
