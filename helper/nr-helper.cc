@@ -1643,6 +1643,17 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
 {
     int64_t initialStream = currentStream;
 
+    auto assignConditionModelStreams = [&](Ptr<ChannelConditionModel> channelConditionModel) {
+        if (channelConditionModel &&
+            std::find(m_channelObjectsWithAssignedStreams.begin(),
+                      m_channelObjectsWithAssignedStreams.end(),
+                      channelConditionModel) == m_channelObjectsWithAssignedStreams.end())
+        {
+            currentStream += channelConditionModel->AssignStreams(currentStream);
+            m_channelObjectsWithAssignedStreams.emplace_back(channelConditionModel);
+        }
+    };
+
     auto propagationLossModel = phy->GetSpectrumChannel()->GetPropagationLossModel();
     Ptr<ChannelConditionModel> channelConditionModel;
     if (propagationLossModel &&
@@ -1667,15 +1678,7 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
         currentStream += propagationLossModel->AssignStreams(currentStream);
         m_channelObjectsWithAssignedStreams.emplace_back(propagationLossModel);
     }
-
-    if (channelConditionModel &&
-        std::find(m_channelObjectsWithAssignedStreams.begin(),
-                  m_channelObjectsWithAssignedStreams.end(),
-                  channelConditionModel) == m_channelObjectsWithAssignedStreams.end())
-    {
-        currentStream += channelConditionModel->AssignStreams(currentStream);
-        m_channelObjectsWithAssignedStreams.emplace_back(channelConditionModel);
-    }
+    assignConditionModelStreams(channelConditionModel);
 
     auto spectrumLossModel =
         phy->GetSpectrumChannel()->GetPhasedArraySpectrumPropagationLossModel();
@@ -1691,21 +1694,32 @@ NrHelper::DoAssignStreamsToChannelObjects(Ptr<NrSpectrumPhy> phy, int64_t curren
             auto nyuSpecModel = DynamicCast<NYUSpectrumPropagationLossModel>(spectrumLossModel);
             auto twoRaySpectrumModel =
                 DynamicCast<TwoRaySpectrumPropagationLossModel>(spectrumLossModel);
+            Ptr<Object> fadingModel = spectrumLossModel;
             if (twoRaySpectrumModel)
             {
                 currentStream += twoRaySpectrumModel->AssignStreams(currentStream);
             }
             else if (tgppSpecModel)
             {
-                currentStream += StaticCast<ThreeGppChannelModel>(tgppSpecModel->GetChannelModel())
-                                     ->AssignStreams(currentStream);
+                fadingModel = tgppSpecModel->GetChannelModel();
+                currentStream +=
+                    StaticCast<ThreeGppChannelModel>(fadingModel)->AssignStreams(currentStream);
             }
             else if (nyuSpecModel)
             {
-                currentStream += StaticCast<NYUChannelModel>(nyuSpecModel->GetChannelModel())
-                                     ->AssignStreams(currentStream);
+                fadingModel = nyuSpecModel->GetChannelModel();
+                currentStream +=
+                    StaticCast<NYUChannelModel>(fadingModel)->AssignStreams(currentStream);
             }
             m_channelObjectsWithAssignedStreams.emplace_back(spectrumLossModel);
+
+            // The fading model shares the channel condition model of the propagation loss model,
+            // but it is the only way to reach it when no propagation loss model is installed
+            PointerValue fadingConditionModel;
+            if (fadingModel->GetAttributeFailSafe("ChannelConditionModel", fadingConditionModel))
+            {
+                assignConditionModelStreams(fadingConditionModel.Get<ChannelConditionModel>());
+            }
         }
     }
 

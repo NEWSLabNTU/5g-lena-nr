@@ -232,7 +232,8 @@ NYUPropagationLossModel::DoAssignStreams(int64_t stream)
 {
     NS_LOG_FUNCTION(this);
     m_uniformVar->SetStream(stream);
-    return 1;
+    m_normRandomVariable->SetStream(stream + 1);
+    return 2;
 }
 
 void

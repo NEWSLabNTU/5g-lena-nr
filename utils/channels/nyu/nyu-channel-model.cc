@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <complex>
 #include <math.h>
-#include <random>
+#include <numeric>
 
 namespace ns3
 {
@@ -1023,17 +1023,23 @@ NYUChannelModel::AssignStreams(int64_t stream)
     m_normalRv->SetStream(stream);
     m_uniformRv->SetStream(stream + 1);
     m_expRv->SetStream(stream + 2);
-    return 3;
+    m_gammaRv->SetStream(stream + 3);
+    return 4;
 }
 
 int
 NYUChannelModel::GetPoissionDist(double lambda) const
 {
     NS_LOG_FUNCTION(this << lambda);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::poisson_distribution<int> distribution(lambda);
-    double value = distribution(gen);
+    // Knuth's method, drawing from m_uniformRv so that the value depends on the assigned stream
+    const double limit = std::exp(-lambda);
+    int value = -1;
+    double product = 1.0;
+    do
+    {
+        ++value;
+        product *= m_uniformRv->GetValue(0, 1);
+    } while (product > limit);
     NS_LOG_DEBUG(" Value in Pois Dist is:" << value);
     return value;
 }
@@ -1084,10 +1090,11 @@ int
 NYUChannelModel::GetBinomialDist(double trials, double success) const
 {
     NS_LOG_FUNCTION(this << trials << success);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::binomial_distribution<int> distribution(trials, success);
-    double value = distribution(gen);
+    int value = 0;
+    for (int trial = 0; trial < static_cast<int>(trials); ++trial)
+    {
+        value += m_uniformRv->GetValue(0, 1) < success ? 1 : 0;
+    }
     NS_LOG_DEBUG(" Value in Binomial Dist is:" << value);
     return value;
 }
