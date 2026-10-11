@@ -1093,6 +1093,11 @@ NrUePhy::UlSrs(const std::shared_ptr<DciInfoElementTdma>& dci)
 
     std::vector<int> channelRbs(GetRbNum());
     std::iota(channelRbs.begin(), channelRbs.end(), 0);
+
+    if (m_enableUplinkPowerControl)
+    {
+        m_txPower = m_powerControl->GetSrsTxPower(channelRbs.size());
+    }
     SetSubChannelsForTransmission(channelRbs, dci->m_numSym);
 
     std::list<Ptr<NrControlMessage>> srsMsg;

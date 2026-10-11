@@ -19,6 +19,8 @@
 #include "ns3/simulator.h"
 #include "ns3/test.h"
 
+#include <cmath>
+
 using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("NrUplinkPowerControlTestCase");
 
@@ -84,12 +86,25 @@ class NrUplinkPowerControlTestCase : public TestCase
      * @param txPower the transmit power in dBm
      */
     void PucchTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower);
+    /**
+     * SRS transmit power trace function
+     * @param cellId the cell ID
+     * @param rnti the RNTI
+     * @param txPower the transmit power in dBm
+     */
+    void SrsTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower);
+    /**
+     * Check that the SRS was transmitted with the power reported by the power control
+     * @param txPower the reported SRS transmit power in dBm
+     */
+    void CheckSrsTxPower(double txPower);
 
   protected:
     void DoRun() override;
 
     Ptr<MobilityModel> m_ueMobility;    //!< UE mobility model
     Ptr<NrUePowerControl> m_ueUpc;      //!< UE uplink power control
+    Ptr<NrUePhy> m_uePhy;               //!< UE PHY
     Time m_movingTime;                  //!< moving time
     double m_expectedPuschTxPower{0.0}; //!< expected PUSCH transmit power in dBm
     double m_expectedPucchTxPower{0.0}; //!< expected PUCCH transmit power in dBm
@@ -100,7 +115,94 @@ class NrUplinkPowerControlTestCase : public TestCase
         true}; //!< flag to indicate if the trace, which calls the test function got executed
     bool m_pucchTxPowerTraceFired{
         true}; //!< Flag to indicate if the trace, which calls the test function got executed
+    uint32_t m_srsTxPowerReports{0}; //!< Number of SRS transmit power reports
 };
+
+/**
+ * @ingroup test
+ *
+ * @brief Check the SRS transmit power computed for each technical specification.
+ *
+ * With TS 36.213, the SRS power is derived from the PUSCH P0 and the SRS offset. With
+ * TS 38.213, it uses the P0Srs attribute instead. The power is compared with the formula of
+ * each specification for a known path loss, and P0Srs is checked to only accept the range
+ * of the p0 field of SRS-Config (TS 38.331).
+ */
+class NrSrsPowerControlTestCase : public TestCase
+{
+  public:
+    /**
+     * @brief Constructor
+     * @param technicalSpec the technical specification used to compute the SRS power
+     */
+    NrSrsPowerControlTestCase(NrUePowerControl::TechnicalSpec technicalSpec)
+        : TestCase(std::string("SRS transmit power with ") +
+                   (technicalSpec == NrUePowerControl::TS_36_213 ? "TS 36.213" : "TS 38.213")),
+          m_technicalSpec(technicalSpec)
+    {
+    }
+
+  protected:
+    void DoRun() override;
+
+  private:
+    NrUePowerControl::TechnicalSpec m_technicalSpec; //!< Technical specification under test
+};
+
+void
+NrSrsPowerControlTestCase::DoRun()
+{
+    auto uePhy = CreateObject<NrUePhy>();
+    auto upc = uePhy->GetUplinkPowerControl();
+
+    const double p0Srs = -70;
+    const int16_t psrsOffset = 9;
+    const int16_t poNominalPusch = -90;
+    const double alpha = 0.8;
+    const double pathLoss = 100;
+    const std::size_t rbNum = 10;
+
+    upc->SetTechnicalSpec(m_technicalSpec);
+    upc->SetAttribute("P0Srs", DoubleValue(p0Srs));
+    upc->SetAttribute("PsrsOffset", IntegerValue(psrsOffset));
+    upc->SetPoNominalPusch(poNominalPusch);
+    upc->SetPoUePusch(0);
+    upc->SetAlpha(alpha);
+    upc->SetPcmin(-40);
+    upc->SetPcmax(23);
+    // The first RSRP only initializes the filter; the second one sets the path loss
+    upc->ConfigureReferenceSignalPower(30);
+    upc->SetRsrp(30 - pathLoss);
+    upc->SetRsrp(30 - pathLoss);
+
+    // Open loop, so the power control adjustment state is 0
+    const double bandwidthTerm = 10 * std::log10(std::pow(2, uePhy->GetNumerology()) * rbNum);
+    const double expected =
+        m_technicalSpec == NrUePowerControl::TS_36_213
+            ? (-10.5 + 1.5 * psrsOffset) + bandwidthTerm + poNominalPusch + alpha * pathLoss
+            : p0Srs + bandwidthTerm + alpha * pathLoss;
+    NS_TEST_EXPECT_MSG_EQ_TOL(upc->GetSrsTxPower(rbNum),
+                              expected,
+                              1e-9,
+                              "Unexpected SRS transmit power");
+
+    // P0Srs only takes values in the range of the p0 field of SRS-Config
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(-202)),
+                          true,
+                          "P0Srs must accept -202 dBm");
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(24)),
+                          true,
+                          "P0Srs must accept 24 dBm");
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(-203)),
+                          false,
+                          "P0Srs must reject values below -202 dBm");
+    NS_TEST_EXPECT_MSG_EQ(upc->SetAttributeFailSafe("P0Srs", DoubleValue(25)),
+                          false,
+                          "P0Srs must reject values above 24 dBm");
+
+    uePhy->Dispose();
+    Simulator::Destroy();
+}
 
 NrUplinkPowerControlTestSuite::NrUplinkPowerControlTestSuite()
     : TestSuite("nr-uplink-power-control-test", Type::SYSTEM)
@@ -116,6 +218,8 @@ NrUplinkPowerControlTestSuite::NrUplinkPowerControlTestSuite()
     AddTestCase(
         new NrUplinkPowerControlTestCase("ClosedLoopPowerControlAccumulatedModeTest", true, true),
         Duration::QUICK);
+    AddTestCase(new NrSrsPowerControlTestCase(NrUePowerControl::TS_36_213), Duration::QUICK);
+    AddTestCase(new NrSrsPowerControlTestCase(NrUePowerControl::TS_38_213), Duration::QUICK);
 }
 
 static NrUplinkPowerControlTestSuite lteUplinkPowerControlTestSuite;
@@ -136,6 +240,15 @@ PucchTxPowerReport(NrUplinkPowerControlTestCase* testcase,
                    double txPower)
 {
     testcase->PucchTxPowerTrace(cellId, rnti, txPower);
+}
+
+void
+SrsTxPowerReport(NrUplinkPowerControlTestCase* testcase,
+                 uint16_t cellId,
+                 uint16_t rnti,
+                 double txPower)
+{
+    testcase->SrsTxPowerTrace(cellId, rnti, txPower);
 }
 
 NrUplinkPowerControlTestCase::NrUplinkPowerControlTestCase(std::string name,
@@ -233,6 +346,27 @@ NrUplinkPowerControlTestCase::PucchTxPowerTrace(uint16_t cellId, uint16_t rnti, 
 }
 
 void
+NrUplinkPowerControlTestCase::SrsTxPowerTrace(uint16_t cellId, uint16_t rnti, double txPower)
+{
+    NS_LOG_FUNCTION(this);
+    // Count the reports, to check at the end that the SRS power was computed at all
+    m_srsTxPowerReports++;
+    // The trace fires inside NrUePhy::UlSrs(), before the PHY stores the power.
+    // Check the PHY power in a separate event, once UlSrs() has returned.
+    Simulator::ScheduleNow(&NrUplinkPowerControlTestCase::CheckSrsTxPower, this, txPower);
+}
+
+void
+NrUplinkPowerControlTestCase::CheckSrsTxPower(double txPower)
+{
+    // The SRS must go out with its own power, not the one left by the last PUSCH or PUCCH
+    NS_TEST_ASSERT_MSG_EQ_TOL(m_uePhy->GetTxPower(),
+                              txPower,
+                              1e-9,
+                              "SRS not transmitted with its power-controlled transmit power");
+}
+
+void
 NrUplinkPowerControlTestCase::DoRun()
 {
     std::string scenario = "InH-OfficeMixed"; // scenario
@@ -325,14 +459,17 @@ NrUplinkPowerControlTestCase::DoRun()
     gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
     ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    Ptr<NrUePhy> uePhy = NrHelper::GetUePhy(ueDevs.Get(0), 0);
+    m_uePhy = NrHelper::GetUePhy(ueDevs.Get(0), 0);
 
-    m_ueUpc = uePhy->GetUplinkPowerControl();
+    m_ueUpc = m_uePhy->GetUplinkPowerControl();
 
     m_ueUpc->TraceConnectWithoutContext("ReportPuschTxPower",
                                         MakeBoundCallback(&PuschTxPowerReport, this));
     m_ueUpc->TraceConnectWithoutContext("ReportPucchTxPower",
                                         MakeBoundCallback(&PucchTxPowerReport, this));
+    // Fires every time the power control computes the SRS power
+    m_ueUpc->TraceConnectWithoutContext("ReportSrsTxPower",
+                                        MakeBoundCallback(&SrsTxPowerReport, this));
 
     Ptr<const NrSpectrumPhy> txSpectrumPhy =
         NrHelper::GetGnbPhy(gnbDevs.Get(0), 0)->GetSpectrumPhy();
@@ -688,6 +825,9 @@ NrUplinkPowerControlTestCase::DoRun()
 
     Simulator::Stop(simTime);
     Simulator::Run();
+
+    // Without UL power control applied to the SRS, the trace never fires
+    NS_TEST_EXPECT_MSG_GT(m_srsTxPowerReports, 0, "SRS transmit power was never computed");
 
     Simulator::Destroy();
 }

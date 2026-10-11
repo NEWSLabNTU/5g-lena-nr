@@ -83,6 +83,14 @@ Bugs fixed
   hold at least that many resources, so retransmissions with no exact shape in the
   slot are no longer held back. Covered by the new ``nr-test-sched-reshape`` test
   suite.
+- Fixed the SRS ignoring uplink power control. ``NrUePhy::UlSrs()`` transmitted
+  the SRS over the whole band with the power left by the previous PUSCH or PUCCH,
+  so its power spectral density depended on what was sent before it. When
+  ``NrUePhy::EnableUplinkPowerControl`` is set, the SRS power is now computed by
+  ``NrUePowerControl::GetSrsTxPower()``, which also makes the ``ReportSrsTxPower``
+  trace fire. ``P0_SRS``, used with ``TSpec`` set to ``TS38.213``, is now the
+  ``NrUePowerControl::P0Srs`` attribute instead of a hard-coded 0 dBm. Covered by
+  the ``nr-uplink-power-control-test`` test suite.
 
 Release NR-v5.1
 ---------------
