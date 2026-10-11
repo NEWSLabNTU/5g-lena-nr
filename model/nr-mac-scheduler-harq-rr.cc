@@ -15,6 +15,7 @@
 #include "ns3/log.h"
 
 #include <algorithm>
+#include <iterator>
 
 namespace ns3
 {
@@ -141,8 +142,11 @@ operator<<(std::ostream& os, const std::vector<bool>& h)
  * @param slotAlloc Slot allocation info
  * @return the VarTtiSlotAlloc ID to use next
  *
- * The algorithm is a bit complex, but nothing special. The HARQ should be
- * placed in 2D space as they were before. Probably there is an error in the algorithm.
+ * The retransmissions of a beam are placed on the same symbols, with the RBGs and
+ * symbol count of their first transmission. A retransmission whose RBGs are taken by
+ * another one of the beam, or whose symbols do not fit, is reshaped into the fewest
+ * symbols left after every beam that hold its resources, keeping its MCS and TBS. With
+ * ConsolidateHarqRetx, every retransmission is reshaped into symbols of its own.
  */
 uint8_t
 NrMacSchedulerHarqRr::ScheduleDlHarq(
@@ -161,6 +165,47 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
 
     const bool isDl = true;
     auto dlBitmask = m_getDlBitmask();
+    // Retransmissions that do not fit with their shape, to reshape into the symbols left
+    std::vector<Ns3Sched::HarqVectorIterator> toReshape;
+    std::vector<uint16_t> retransmittingUes;
+
+    // Place the retransmission of a HARQ process with the shape of reshapedDci.
+    // rbgAssigned is the RBGs times symbols of the first transmission.
+    auto placeRetx =
+        [&](HarqProcess& harqProcess, const DciInfoElementTdma& reshapedDci, uint32_t rbgAssigned) {
+            NS_ASSERT(reshapedDci.m_format == DciInfoElementTdma::DL);
+            auto dci = std::make_shared<DciInfoElementTdma>(reshapedDci.m_rnti,
+                                                            reshapedDci.m_format,
+                                                            reshapedDci.m_symStart,
+                                                            reshapedDci.m_numSym,
+                                                            reshapedDci.m_mcs,
+                                                            reshapedDci.m_rank,
+                                                            reshapedDci.m_precMats,
+                                                            reshapedDci.m_tbSize,
+                                                            0,
+                                                            reshapedDci.m_rv + 1,
+                                                            DciInfoElementTdma::DATA,
+                                                            reshapedDci.m_bwpIndex,
+                                                            reshapedDci.m_tpc);
+            dci->m_rbgBitmask = reshapedDci.m_rbgBitmask;
+            dci->m_harqProcess = reshapedDci.m_harqProcess;
+            harqProcess.m_dciElement = dci;
+            harqProcess.m_txAttempts++;
+            retransmittingUes.push_back(dci->m_rnti);
+
+            VarTtiAllocInfo slotInfo(dci);
+            NS_LOG_DEBUG("UE" << dci->m_rnti << " gets DL symbols " << +dci->m_symStart << "-"
+                              << dci->m_symStart + dci->m_numSym - 1 << " tbs " << dci->m_tbSize
+                              << " harqId " << +dci->m_harqProcess << " rv " << +dci->m_rv
+                              << " RETX on RBGs" << dci->m_rbgBitmask);
+            for (const auto& rlcPdu : harqProcess.m_rlcPduInfo)
+            {
+                slotInfo.m_rlcPduInfo.push_back(rlcPdu);
+            }
+            slotAlloc->m_varTtiAllocInfo.push_back(slotInfo);
+            ueMap.find(dci->m_rnti)->second->m_dlMRBRetx = dci->m_numSym * rbgAssigned;
+        };
+
     NS_LOG_INFO("We have " << activeDlHarq.size() << " beams with data to RETX");
     for (const auto beamId : GetBeamOrderRR(activeDlHarq))
     {
@@ -286,6 +331,18 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
                 }
             }
 
+            // Without consolidation, a retransmission that keeps its shape is placed on the
+            // symbols of the beam. When its RBGs are taken, or its symbols do not fit, it is
+            // reshaped into the symbols left after every beam.
+            if (!m_consolidateHarqRetx &&
+                (reshapedDcis.empty() || symAvail < reshapedDcis.front().m_numSym))
+            {
+                NS_LOG_INFO("This HARQ allocation does not fit with its shape, "
+                            "reshape it into the symbols left");
+                toReshape.push_back(it);
+                continue;
+            }
+
             // If allocation reshaping did not work, buffer DCI
             if (reshapedDcis.empty())
             {
@@ -322,46 +379,7 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
             dlBitmask = dlBitmaskBackup;
             currStartingSymbol = currStartingSymbolBackup;
             allocatedUe.push_back(dciInfoReTx->m_rnti);
-
-            NS_ASSERT(dciInfoReTx->m_format == DciInfoElementTdma::DL);
-            const uint8_t nextAttempts = harqProcess.m_txAttempts + 1;
-            auto dci = std::make_shared<DciInfoElementTdma>(dciInfoReTx->m_rnti,
-                                                            dciInfoReTx->m_format,
-                                                            dciInfoReTx->m_symStart,
-                                                            dciInfoReTx->m_numSym,
-                                                            dciInfoReTx->m_mcs,
-                                                            dciInfoReTx->m_rank,
-                                                            dciInfoReTx->m_precMats,
-                                                            dciInfoReTx->m_tbSize,
-                                                            0,
-                                                            dciInfoReTx->m_rv + 1,
-                                                            DciInfoElementTdma::DATA,
-                                                            dciInfoReTx->m_bwpIndex,
-                                                            dciInfoReTx->m_tpc);
-
-            dci->m_rbgBitmask = harqProcess.m_dciElement->m_rbgBitmask;
-            dci->m_harqProcess = dciInfoReTx->m_harqProcess;
-
-            harqProcess.m_dciElement = dci;
-            harqProcess.m_txAttempts = nextAttempts;
-            dciInfoReTx = harqProcess.m_dciElement;
-
-            VarTtiAllocInfo slotInfo(dciInfoReTx);
-            NS_LOG_DEBUG(
-                "UE" << dciInfoReTx->m_rnti << " gets DL symbols "
-                     << static_cast<uint32_t>(dciInfoReTx->m_symStart) << "-"
-                     << static_cast<uint32_t>(dciInfoReTx->m_symStart + dciInfoReTx->m_numSym - 1)
-                     << " tbs " << dciInfoReTx->m_tbSize << " harqId "
-                     << static_cast<uint32_t>(dciInfoReTx->m_harqProcess) << " rv "
-                     << static_cast<uint32_t>(dciInfoReTx->m_rv) << " RETX on RBGs"
-                     << dciInfoReTx->m_rbgBitmask);
-            for (const auto& rlcPdu : harqProcess.m_rlcPduInfo)
-            {
-                slotInfo.m_rlcPduInfo.push_back(rlcPdu);
-            }
-            slotAlloc->m_varTtiAllocInfo.push_back(slotInfo);
-            ueMap.find(dciInfoReTx->m_rnti)->second->m_dlMRBRetx =
-                dciInfoReTx->m_numSym * rbgAssigned;
+            placeRetx(harqProcess, *dciInfoReTx, rbgAssigned);
         }
         // If there are still symbols left for the next beam, reset RBG mask
         if (symAvail > 0)
@@ -388,6 +406,38 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
             }
         }
     }
+    // Each reshaped retransmission gets symbols of its own, over the DL band
+    for (auto it : toReshape)
+    {
+        HarqProcess& harqProcess = it->second;
+        const auto& dciInfoReTx = harqProcess.m_dciElement;
+        const uint32_t rbgAssigned =
+            std::count(dciInfoReTx->m_rbgBitmask.begin(), dciInfoReTx->m_rbgBitmask.end(), 1) *
+            dciInfoReTx->m_numSym;
+        std::vector<DciInfoElementTdma> reshapedDcis;
+        if (std::find(retransmittingUes.begin(), retransmittingUes.end(), dciInfoReTx->m_rnti) ==
+                retransmittingUes.end() &&
+            symAvail > 0)
+        {
+            auto bitmask = m_getDlBitmask();
+            reshapedDcis =
+                m_getReshapeAllocation({*dciInfoReTx}, currStartingSymbol, symAvail, bitmask, isDl);
+        }
+        if (reshapedDcis.empty())
+        {
+            NS_LOG_INFO("No resources left to reshape this HARQ allocation, we have to buffer it");
+            BufferHARQFeedback(dlHarqFeedback,
+                               dlHarqToRetransmit,
+                               dciInfoReTx->m_rnti,
+                               dciInfoReTx->m_harqProcess);
+            continue;
+        }
+        NS_LOG_INFO("Reshaped the retransmission from " << +dciInfoReTx->m_numSym << " to "
+                                                        << +reshapedDcis.front().m_numSym
+                                                        << " symbols");
+        placeRetx(harqProcess, reshapedDcis.front(), rbgAssigned);
+    }
+
     NS_ASSERT(startingPoint->m_rbg == 0);
 
     auto usedSymbols = nr::CountUsedSymbolsFromVarAllocTtiRange(
@@ -408,11 +458,13 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
  * @param slotAlloc Slot allocation info
  * @return the VarTtiSlotAlloc ID to use next
  *
- * The algorithm for scheduling the UL HARQ is straightforward. Since the UL
- * transmission are all TDMA, for each NACKed process a DCI is built, with
- * the exact same specification as the first transmission. If there aren't
- * available symbols to retransmit the data, the feedback is buffered for
- * the next slot.
+ * For each NACKed process a DCI is built, with the exact same specification
+ * (RBGs, symbol count, MCS and TBS) as the first transmission. A retransmission
+ * shares the symbols of one already placed in this slot when both have the same
+ * symbol count, the UEs share a beam, and their RBGs do not overlap; otherwise it
+ * gets its own symbols. When its symbols do not fit in the ones left, it is
+ * reshaped into the fewest of them that hold its resources, keeping its MCS and
+ * TBS. If even that does not fit, the feedback is buffered for the next slot.
  */
 uint8_t
 NrMacSchedulerHarqRr::ScheduleUlHarq(
@@ -427,12 +479,23 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
     uint8_t symUsed = 0;
     NS_ASSERT(startingPoint->m_rbg == 0);
 
+    /// Symbols already given to UL retransmissions in this slot
+    struct RetxSpan
+    {
+        uint8_t symStart;       ///< First symbol
+        uint8_t numSym;         ///< Number of symbols
+        BeamId beamId;          ///< Beam of the UEs retransmitting in this span
+        std::vector<bool> rbgs; ///< RBGs already used in this span
+    };
+
+    std::vector<RetxSpan> spans;
+
     NS_LOG_INFO("Scheduling UL HARQ starting from sym "
                 << +startingPoint->m_sym << " and RBG " << startingPoint->m_rbg
                 << ". Available symbols: " << symAvail
                 << " number of feedback: " << ulHarqFeedback.size());
 
-    for (uint16_t i = 0; i < ulHarqFeedback.size() && symAvail > 0; i++)
+    for (std::size_t i = 0; i < ulHarqFeedback.size() && (symAvail > 0 || !spans.empty()); i++)
     {
         const UlHarqInfo& harqInfo = ulHarqFeedback.at(i);
         uint8_t harqId = harqInfo.m_harqProcessId;
@@ -451,35 +514,81 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
         NS_LOG_INFO("Feedback is for UE " << rnti << " process " << +harqId
                                           << " sym: " << +dciInfoReTx->m_numSym);
 
-        if (symAvail >= dciInfoReTx->m_numSym)
+        const auto& beamId = ueMap.find(rnti)->second->m_beamId;
+        uint8_t numSym = dciInfoReTx->m_numSym;
+        std::vector<bool> rbgs = dciInfoReTx->m_rbgBitmask;
+        auto span = std::find_if(spans.begin(), spans.end(), [&](const RetxSpan& sp) {
+            if (sp.numSym != numSym || sp.beamId != beamId || sp.rbgs.size() != rbgs.size())
+            {
+                return false;
+            }
+            for (std::size_t rbg = 0; rbg < rbgs.size(); ++rbg)
+            {
+                if (rbgs[rbg] && sp.rbgs[rbg])
+                {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (span == spans.end() && symAvail > 0 && symAvail < numSym)
         {
-            symAvail -= dciInfoReTx->m_numSym;
-            symUsed += dciInfoReTx->m_numSym;
+            // The symbols left are taken from the end of the slot backwards
+            uint8_t reshapeStart = startingPoint->m_sym - symAvail;
+            uint8_t reshapeSym = symAvail;
+            auto bitmask = m_getUlBitmask();
+            const bool isDl = false;
+            const auto reshaped =
+                m_getReshapeAllocation({*dciInfoReTx}, reshapeStart, reshapeSym, bitmask, isDl);
+            if (!reshaped.empty())
+            {
+                NS_LOG_INFO("Reshaped the retransmission from "
+                            << +numSym << " to " << +reshaped.front().m_numSym << " symbols");
+                numSym = reshaped.front().m_numSym;
+                rbgs = reshaped.front().m_rbgBitmask;
+            }
+        }
+
+        if (span == spans.end() && symAvail >= numSym)
+        {
+            symAvail -= numSym;
+            symUsed += numSym;
+            startingPoint->m_sym -= numSym;
+            slotAlloc->m_numSymAlloc += numSym;
+            spans.push_back(
+                {startingPoint->m_sym, numSym, beamId, std::vector<bool>(rbgs.size(), false)});
+            span = std::prev(spans.end());
+        }
+
+        if (span != spans.end())
+        {
+            for (std::size_t rbg = 0; rbg < rbgs.size(); ++rbg)
+            {
+                span->rbgs[rbg] = span->rbgs[rbg] || rbgs[rbg];
+            }
 
             NS_ASSERT(dciInfoReTx->m_format == DciInfoElementTdma::UL);
 
             const uint8_t nextAttempts = harqProcess.m_txAttempts + 1;
-            auto dci =
-                std::make_shared<DciInfoElementTdma>(dciInfoReTx->m_rnti,
-                                                     dciInfoReTx->m_format,
-                                                     startingPoint->m_sym - dciInfoReTx->m_numSym,
-                                                     dciInfoReTx->m_numSym,
-                                                     dciInfoReTx->m_mcs,
-                                                     dciInfoReTx->m_rank,
-                                                     dciInfoReTx->m_precMats,
-                                                     dciInfoReTx->m_tbSize,
-                                                     0,
-                                                     dciInfoReTx->m_rv + 1,
-                                                     DciInfoElementTdma::DATA,
-                                                     dciInfoReTx->m_bwpIndex,
-                                                     dciInfoReTx->m_tpc);
-            dci->m_rbgBitmask = harqProcess.m_dciElement->m_rbgBitmask;
+            auto dci = std::make_shared<DciInfoElementTdma>(dciInfoReTx->m_rnti,
+                                                            dciInfoReTx->m_format,
+                                                            span->symStart,
+                                                            numSym,
+                                                            dciInfoReTx->m_mcs,
+                                                            dciInfoReTx->m_rank,
+                                                            dciInfoReTx->m_precMats,
+                                                            dciInfoReTx->m_tbSize,
+                                                            0,
+                                                            dciInfoReTx->m_rv + 1,
+                                                            DciInfoElementTdma::DATA,
+                                                            dciInfoReTx->m_bwpIndex,
+                                                            dciInfoReTx->m_tpc);
+            dci->m_rbgBitmask = rbgs;
             dci->m_harqProcess = harqId;
             harqProcess.m_dciElement = dci;
             harqProcess.m_txAttempts = nextAttempts;
             dciInfoReTx = harqProcess.m_dciElement;
-
-            startingPoint->m_sym -= dciInfoReTx->m_numSym;
 
             VarTtiAllocInfo slotInfo(dciInfoReTx);
             NS_LOG_DEBUG(
@@ -490,7 +599,6 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
                      << static_cast<uint32_t>(dciInfoReTx->m_harqProcess) << " rv "
                      << static_cast<uint32_t>(dciInfoReTx->m_rv) << " RETX");
             slotAlloc->m_varTtiAllocInfo.push_front(slotInfo);
-            slotAlloc->m_numSymAlloc += dciInfoReTx->m_numSym;
 
             ueMap.find(rnti)->second->m_ulMRBRetx = dciInfoReTx->m_numSym * GetBandwidthInRbg();
         }
@@ -499,6 +607,9 @@ NrMacSchedulerHarqRr::ScheduleUlHarq(
             ulHarqToRetransmit->push_back(ulHarqFeedback.at(i));
         }
     }
+
+    // Retransmissions sharing a span were added after the spans that followed it
+    std::stable_sort(slotAlloc->m_varTtiAllocInfo.begin(), slotAlloc->m_varTtiAllocInfo.end());
 
     NS_ASSERT(startingPoint->m_rbg == 0);
 

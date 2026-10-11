@@ -250,6 +250,12 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
     friend class NrTestMacSchedulerHarqRrBeamOrder;
     friend class NrTestMacSchedulerHarqRrSymbolBudget;
     friend class NrTestMacSchedulerHarqRrOfdmaSharing;
+    friend class NrTestMacSchedulerHarqRrUlSharing;
+    friend class NrTestMacSchedulerHarqRrDlReshape;
+    friend class NrTestMacSchedulerHarqRrUlFill;
+    friend class NrTestMacSchedulerHarqRrDlFill;
+    friend class NrTestMacSchedulerHarqRrFillUtilization;
+    friend class NrTestMacSchedulerHarqRrUlSpanSpread;
 
   public:
     /**
@@ -968,6 +974,33 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
      * (true) or not (false) in the uplink.
      */
     std::vector<bool> GetUlBitmask() const;
+    /**
+     * @brief Returns the RBGs that UL data can be assigned to. They are the ones of
+     * GetUlBitmask(), unless the scheduler is filling the RBGs left free by UL HARQ
+     * retransmissions.
+     */
+    std::vector<bool> GetUlDataBitmask() const;
+    /**
+     * @brief Returns the RBGs that DL data can be assigned to. They are the ones of
+     * GetDlBitmask(), unless the scheduler is filling the RBGs left free by DL HARQ
+     * retransmissions.
+     */
+    std::vector<bool> GetDlDataBitmask() const;
+
+    /**
+     * @brief Whether new data can be frequency multiplexed with HARQ retransmissions of other
+     * UEs, on the symbols of the retransmissions
+     *
+     * A UE never gets new data on the symbols of its own retransmission, as it cannot
+     * receive (or transmit) two PDSCHs (or PUSCHs) that overlap in time on a serving cell
+     * (TS 38.214, clauses 5.1 and 6.1).
+     *
+     * @return true if the scheduler can assign part of the band to new data
+     */
+    virtual bool CanShareRetxSymbols() const
+    {
+        return false;
+    }
 
     // Generic function serves as trampoline to Tdma and Ofdma, plus gives access to ueInfo map
     std::vector<DciInfoElementTdma> ReshapeAllocation(const std::vector<DciInfoElementTdma>& dcis,
@@ -986,12 +1019,81 @@ class NR_EXPORT NrMacSchedulerNs3 : public NrMacScheduler
         const std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>& ueMap) = 0;
 
   private:
+    /**
+     * @brief Schedule UL data on the RBGs left free by the UL HARQ retransmissions of the slot
+     *
+     * The active UEs of each beam are spread over the spans of symbols holding UL
+     * retransmissions of that beam (see SelectRetxSpanUes()), and scheduled on the RBGs the
+     * retransmissions do not use, over the same symbols.
+     *
+     * @param activeUlUe active UL UEs, from which the UEs scheduled here are removed
+     * @param symAvail UL data symbols left for new data after the retransmissions
+     * @param allocInfo slot allocation, to which the new DCIs are added
+     */
+    void ScheduleUlDataInRetxSpans(ActiveUeMap* activeUlUe,
+                                   uint8_t symAvail,
+                                   SlotAllocInfo* allocInfo) const;
+
+    /**
+     * @brief Schedule DL data on the RBGs left free by the DL HARQ retransmissions of the slot
+     *
+     * The active UEs of a beam are spread over the spans of symbols holding DL
+     * retransmissions of that beam alone (see SelectRetxSpanUes()), and scheduled on the RBGs
+     * that no allocation uses within the span, over all the symbols of the span.
+     *
+     * @param activeDlUe active DL UEs, from which the UEs scheduled here are removed
+     * @param symAvail DL data symbols left for new data after the retransmissions
+     * @param allocInfo slot allocation, to which the new DCIs are added
+     */
+    void ScheduleDlDataInRetxSpans(ActiveUeMap* activeDlUe,
+                                   uint8_t symAvail,
+                                   SlotAllocInfo* allocInfo) const;
+
+    /**
+     * @brief Free resources of a span of symbols holding HARQ retransmissions
+     */
+    struct RetxSpanRoom
+    {
+        uint32_t numRbg; ///< RBGs left free by the retransmissions
+        uint8_t numSym;  ///< Symbols of the span
+    };
+
+    /**
+     * @brief Select the UEs to schedule on the RBGs left free by HARQ retransmissions
+     *
+     * The spans of a beam are filled together. Each UE, smallest buffer first, goes to the
+     * span in which it would get the most RBGs times symbols, assuming the free RBGs of a
+     * span are split evenly among its UEs, as long as that share carries its data and the
+     * data of the UEs already there. A UE gets a single DCI per slot, so a UE scheduled over
+     * the retransmission symbols cannot use the symbols left after them. A UE whose data
+     * fits in no span is still moved to the span with the largest share when the buffers of
+     * the UEs left behind can fill the remaining symbols, or when no symbols remain.
+     *
+     * @param beamUes active UEs in the beam of the retransmissions
+     * @param activeUe active UEs of every beam
+     * @param spans free resources of each retransmission span of the beam
+     * @param symAvail data symbols left for new data after the retransmissions
+     * @param isDl whether the selection is for the DL (true) or the UL (false)
+     * @return the UEs to schedule over the symbols of each span, in the order of spans
+     */
+    std::vector<std::vector<UePtrAndBufferReq>> SelectRetxSpanUes(
+        const std::vector<UePtrAndBufferReq>& beamUes,
+        const ActiveUeMap& activeUe,
+        const std::vector<RetxSpanRoom>& spans,
+        uint8_t symAvail,
+        bool isDl) const;
+
     void CallNrFhControlForMapUpdate(
         const std::deque<VarTtiAllocInfo>& allocation,
         const std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>& ueMap);
 
     std::unordered_map<uint16_t, std::shared_ptr<NrMacSchedulerUeInfo>>
         m_ueMap; //!< The map of between RNTI and their data
+
+    /// RBGs that UL data is restricted to while filling UL retransmission spans, empty otherwise
+    mutable std::vector<bool> m_ulDataRbgMask;
+    /// RBGs that DL data is restricted to while filling DL retransmission spans, empty otherwise
+    mutable std::vector<bool> m_dlDataRbgMask;
 
     /**
      * Map of previous allocated UE per RBG

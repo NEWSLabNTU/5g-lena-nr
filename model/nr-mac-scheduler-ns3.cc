@@ -25,7 +25,9 @@
 #include "ns3/uinteger.h"
 
 #include <algorithm>
+#include <map>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <unordered_set>
 
@@ -2297,6 +2299,11 @@ NrMacSchedulerNs3::DoScheduleUl(const std::vector<UlHarqInfo>& ulHarqFeedback,
         }
     }
 
+    if (CanShareRetxSymbols() && !activeUlUe.empty())
+    {
+        ScheduleUlDataInRetxSpans(&activeUlUe, ulSymAvail, allocInfo);
+    }
+
     if (ulSymAvail > 0 && !activeUlUe.empty())
     {
         uint8_t usedUl =
@@ -2625,6 +2632,11 @@ NrMacSchedulerNs3::DoScheduleDl(const std::vector<DlHarqInfo>& dlHarqFeedback,
                 break;
             }
         }
+    }
+
+    if (CanShareRetxSymbols() && !activeDlUe->empty())
+    {
+        ScheduleDlDataInRetxSpans(activeDlUe, dlSymAvail, allocInfo);
     }
 
     if (dlSymAvail == 0 && !activeDlUe->empty())
@@ -3089,6 +3101,379 @@ NrMacSchedulerNs3::GetDlBitmask() const
     dlNotchedRBGsMask = dlNotchedRBGsMask.empty() ? std::vector<bool>(GetBandwidthInRbg(), true)
                                                   : dlNotchedRBGsMask;
     return dlNotchedRBGsMask;
+}
+
+std::vector<bool>
+NrMacSchedulerNs3::GetUlDataBitmask() const
+{
+    return m_ulDataRbgMask.empty() ? GetUlBitmask() : m_ulDataRbgMask;
+}
+
+void
+NrMacSchedulerNs3::ScheduleUlDataInRetxSpans(ActiveUeMap* activeUlUe,
+                                             uint8_t symAvail,
+                                             SlotAllocInfo* allocInfo) const
+{
+    NS_LOG_FUNCTION(this);
+
+    /// Symbols holding UL retransmissions, and the RBGs they leave free
+    struct RetxSpan
+    {
+        uint8_t numSym;             ///< Number of symbols
+        BeamId beamId;              ///< Beam of the retransmitting UEs
+        std::vector<bool> freeRbgs; ///< RBGs not used by the retransmissions
+    };
+
+    std::map<uint8_t, RetxSpan> spans; // by starting symbol
+    for (const auto& alloc : allocInfo->m_varTtiAllocInfo)
+    {
+        const auto& dci = alloc.m_dci;
+        if (dci->m_format != DciInfoElementTdma::UL || dci->m_type != DciInfoElementTdma::DATA ||
+            dci->m_rv == 0)
+        {
+            continue;
+        }
+        auto ue = m_ueMap.find(dci->m_rnti);
+        if (ue == m_ueMap.end())
+        {
+            continue;
+        }
+        auto [span, inserted] =
+            spans.try_emplace(dci->m_symStart,
+                              RetxSpan{dci->m_numSym, ue->second->m_beamId, GetUlBitmask()});
+        NS_ASSERT(span->second.numSym == dci->m_numSym);
+        NS_ASSERT(span->second.freeRbgs.size() == dci->m_rbgBitmask.size());
+        for (std::size_t rbg = 0; rbg < dci->m_rbgBitmask.size(); ++rbg)
+        {
+            if (dci->m_rbgBitmask[rbg])
+            {
+                span->second.freeRbgs[rbg] = false;
+            }
+        }
+    }
+
+    // The spans of a beam share the UEs of the beam, so they are filled together
+    std::vector<BeamId> beams;
+    for (const auto& [symStart, span] : spans)
+    {
+        if (std::find(beams.begin(), beams.end(), span.beamId) == beams.end())
+        {
+            beams.push_back(span.beamId);
+        }
+    }
+
+    for (const auto& beamId : beams)
+    {
+        auto beamUes = activeUlUe->find(beamId);
+        if (beamUes == activeUlUe->end())
+        {
+            continue;
+        }
+
+        std::vector<uint8_t> spanStarts;
+        std::vector<RetxSpanRoom> rooms;
+        for (const auto& [symStart, span] : spans)
+        {
+            const auto numRbg = std::count(span.freeRbgs.begin(), span.freeRbgs.end(), true);
+            if (span.beamId == beamId && numRbg > 0)
+            {
+                spanStarts.push_back(symStart);
+                rooms.push_back({static_cast<uint32_t>(numRbg), span.numSym});
+            }
+        }
+        if (rooms.empty())
+        {
+            continue;
+        }
+        auto selections = SelectRetxSpanUes(beamUes->second, *activeUlUe, rooms, symAvail, false);
+
+        for (std::size_t i = 0; i < spanStarts.size(); ++i)
+        {
+            if (selections[i].empty())
+            {
+                continue;
+            }
+            const auto symStart = spanStarts[i];
+            const auto& span = spans.at(symStart);
+            NS_LOG_INFO("Scheduling UL data on the RBGs left free by the retransmissions at symbol "
+                        << +symStart);
+            ActiveUeMap spanUes{{beamId, std::move(selections[i])}};
+            PointInFTPlane spanEnd(0, symStart + span.numSym);
+            SlotAllocInfo spanAlloc(allocInfo->m_sfnSf);
+            m_ulDataRbgMask = span.freeRbgs;
+            DoScheduleUlData(&spanEnd, span.numSym, spanUes, &spanAlloc);
+            m_ulDataRbgMask.clear();
+
+            for (const auto& alloc : spanAlloc.m_varTtiAllocInfo)
+            {
+                NS_ASSERT(alloc.m_dci->m_symStart == symStart);
+                NS_ASSERT(alloc.m_dci->m_numSym == span.numSym);
+                allocInfo->m_varTtiAllocInfo.push_back(alloc);
+                auto& ues = beamUes->second;
+                ues.erase(std::remove_if(ues.begin(),
+                                         ues.end(),
+                                         [&alloc](const UePtrAndBufferReq& ue) {
+                                             return ue.first->m_rnti == alloc.m_dci->m_rnti;
+                                         }),
+                          ues.end());
+            }
+        }
+        if (beamUes->second.empty())
+        {
+            activeUlUe->erase(beamUes);
+        }
+    }
+
+    std::stable_sort(allocInfo->m_varTtiAllocInfo.begin(), allocInfo->m_varTtiAllocInfo.end());
+}
+
+std::vector<std::vector<NrMacSchedulerNs3::UePtrAndBufferReq>>
+NrMacSchedulerNs3::SelectRetxSpanUes(const std::vector<UePtrAndBufferReq>& beamUes,
+                                     const ActiveUeMap& activeUe,
+                                     const std::vector<RetxSpanRoom>& spans,
+                                     uint8_t symAvail,
+                                     bool isDl) const
+{
+    NS_LOG_FUNCTION(this << spans.size() << +symAvail << isDl);
+
+    auto capacity = [this, isDl](const UePtr& ue, uint32_t rbgSym) {
+        const uint32_t numRbs = rbgSym * GetNumRbPerRbg();
+        return isDl ? m_dlAmc->CalculateTbSize(ue->GetDlMcs(), ue->m_dlRank, numRbs)
+                    : m_ulAmc->CalculateTbSize(ue->m_ulMcs, ue->m_ulRank, numRbs);
+    };
+
+    // Upper bound of the bytes the remaining symbols carry, at the best MCS among the UEs
+    uint32_t remainingCapacity = 0;
+    uint64_t remainingBuffer = 0;
+    for (const auto& [beamId, ues] : activeUe)
+    {
+        for (const auto& [ue, bufferReq] : ues)
+        {
+            if (symAvail > 0)
+            {
+                remainingCapacity =
+                    std::max(remainingCapacity, capacity(ue, symAvail * GetBandwidthInRbg()));
+            }
+            remainingBuffer += bufferReq;
+        }
+    }
+
+    std::vector<std::vector<UePtrAndBufferReq>> selected(spans.size());
+
+    // RBGs times symbols of each UE of span s once it holds one more UE
+    auto nextShare = [&spans, &selected](std::size_t s) {
+        return spans[s].numRbg / (selected[s].size() + 1) * spans[s].numSym;
+    };
+    // Whether that share carries the data of the UE and of the UEs already in span s
+    auto fits = [&](std::size_t s, const UePtrAndBufferReq& ue) {
+        const uint32_t share = nextShare(s);
+        if (share == 0 || capacity(ue.first, share) < ue.second)
+        {
+            return false;
+        }
+        return std::all_of(selected[s].begin(),
+                           selected[s].end(),
+                           [&](const UePtrAndBufferReq& other) {
+                               return capacity(other.first, share) >= other.second;
+                           });
+    };
+
+    auto candidates = beamUes;
+    std::stable_sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const UePtrAndBufferReq& a, const UePtrAndBufferReq& b) { return a.second < b.second; });
+    for (const auto& ue : candidates)
+    {
+        std::optional<std::size_t> fitting;
+        std::optional<std::size_t> roomiest;
+        for (std::size_t s = 0; s < spans.size(); ++s)
+        {
+            if (nextShare(s) == 0)
+            {
+                continue;
+            }
+            if (!roomiest || nextShare(s) > nextShare(*roomiest))
+            {
+                roomiest = s;
+            }
+            if (fits(s, ue) && (!fitting || nextShare(s) > nextShare(*fitting)))
+            {
+                fitting = s;
+            }
+        }
+
+        auto span = fitting;
+        if (!span && (symAvail == 0 || remainingBuffer - ue.second >= remainingCapacity))
+        {
+            // The UEs left behind still fill the remaining symbols, if any
+            span = roomiest;
+        }
+        if (!span)
+        {
+            continue;
+        }
+        remainingBuffer -= ue.second;
+        selected[*span].push_back(ue);
+    }
+
+    for (std::size_t s = 0; s < spans.size(); ++s)
+    {
+        NS_LOG_DEBUG("Selected " << selected[s].size() << " of " << beamUes.size()
+                                 << " UEs for the retransmission span " << s << ", leaving "
+                                 << remainingBuffer << " bytes for " << remainingCapacity
+                                 << " bytes of the remaining symbols");
+    }
+    return selected;
+}
+
+std::vector<bool>
+NrMacSchedulerNs3::GetDlDataBitmask() const
+{
+    return m_dlDataRbgMask.empty() ? GetDlBitmask() : m_dlDataRbgMask;
+}
+
+void
+NrMacSchedulerNs3::ScheduleDlDataInRetxSpans(ActiveUeMap* activeDlUe,
+                                             uint8_t symAvail,
+                                             SlotAllocInfo* allocInfo) const
+{
+    NS_LOG_FUNCTION(this);
+
+    /// Symbols holding DL retransmissions, and the beam of the retransmitting UEs
+    struct RetxSpan
+    {
+        uint8_t symStart; ///< First symbol
+        uint8_t symEnd;   ///< One past the last symbol
+        BeamId beamId;    ///< Beam of the retransmitting UEs
+        bool singleBeam;  ///< Whether all the retransmissions of the span share the beam
+    };
+
+    // Retransmissions of a beam may differ in length, so merge the ones that overlap in time
+    std::vector<RetxSpan> spans;
+    for (const auto& alloc : allocInfo->m_varTtiAllocInfo)
+    {
+        const auto& dci = alloc.m_dci;
+        if (dci->m_format != DciInfoElementTdma::DL || dci->m_type != DciInfoElementTdma::DATA ||
+            dci->m_rv == 0)
+        {
+            continue;
+        }
+        auto ue = m_ueMap.find(dci->m_rnti);
+        if (ue == m_ueMap.end())
+        {
+            continue;
+        }
+        const uint8_t symEnd = dci->m_symStart + dci->m_numSym;
+        auto span = std::find_if(spans.begin(), spans.end(), [&dci, symEnd](const RetxSpan& s) {
+            return dci->m_symStart < s.symEnd && s.symStart < symEnd;
+        });
+        if (span == spans.end())
+        {
+            spans.push_back(RetxSpan{dci->m_symStart, symEnd, ue->second->m_beamId, true});
+            continue;
+        }
+        span->symStart = std::min(span->symStart, dci->m_symStart);
+        span->symEnd = std::max(span->symEnd, symEnd);
+        span->singleBeam = span->singleBeam && span->beamId == ue->second->m_beamId;
+    }
+
+    // Leave out the RBGs of every allocation within a span, not only the retransmissions
+    std::vector<std::vector<bool>> spanFreeRbgs;
+    for (const auto& span : spans)
+    {
+        auto freeRbgs = GetDlBitmask();
+        for (const auto& alloc : allocInfo->m_varTtiAllocInfo)
+        {
+            const auto& dci = alloc.m_dci;
+            if (dci->m_symStart >= span.symEnd || dci->m_symStart + dci->m_numSym <= span.symStart)
+            {
+                continue;
+            }
+            NS_ASSERT(dci->m_rbgBitmask.size() == freeRbgs.size());
+            for (std::size_t rbg = 0; rbg < freeRbgs.size(); ++rbg)
+            {
+                freeRbgs[rbg] = freeRbgs[rbg] && !dci->m_rbgBitmask[rbg];
+            }
+        }
+        spanFreeRbgs.push_back(std::move(freeRbgs));
+    }
+
+    // The spans of a beam share the UEs of the beam, so they are filled together
+    std::vector<BeamId> beams;
+    for (const auto& span : spans)
+    {
+        if (span.singleBeam && std::find(beams.begin(), beams.end(), span.beamId) == beams.end())
+        {
+            beams.push_back(span.beamId);
+        }
+    }
+
+    for (const auto& beamId : beams)
+    {
+        auto beamUes = activeDlUe->find(beamId);
+        if (beamUes == activeDlUe->end())
+        {
+            continue;
+        }
+
+        std::vector<std::size_t> spanIndexes;
+        std::vector<RetxSpanRoom> rooms;
+        for (std::size_t i = 0; i < spans.size(); ++i)
+        {
+            const auto& freeRbgs = spanFreeRbgs[i];
+            const auto numRbg = std::count(freeRbgs.begin(), freeRbgs.end(), true);
+            if (spans[i].singleBeam && spans[i].beamId == beamId && numRbg > 0)
+            {
+                spanIndexes.push_back(i);
+                rooms.push_back({static_cast<uint32_t>(numRbg),
+                                 static_cast<uint8_t>(spans[i].symEnd - spans[i].symStart)});
+            }
+        }
+        if (rooms.empty())
+        {
+            continue;
+        }
+        auto selections = SelectRetxSpanUes(beamUes->second, *activeDlUe, rooms, symAvail, true);
+
+        for (std::size_t i = 0; i < spanIndexes.size(); ++i)
+        {
+            if (selections[i].empty())
+            {
+                continue;
+            }
+            const auto& span = spans[spanIndexes[i]];
+            const uint8_t numSym = span.symEnd - span.symStart;
+            NS_LOG_INFO("Scheduling DL data on the RBGs left free by the retransmissions at symbol "
+                        << +span.symStart);
+            ActiveUeMap spanUes{{beamId, std::move(selections[i])}};
+            PointInFTPlane spanStart(0, span.symStart);
+            SlotAllocInfo spanAlloc(allocInfo->m_sfnSf);
+            m_dlDataRbgMask = spanFreeRbgs[spanIndexes[i]];
+            DoScheduleDlData(&spanStart, numSym, spanUes, &spanAlloc);
+            m_dlDataRbgMask.clear();
+
+            for (const auto& alloc : spanAlloc.m_varTtiAllocInfo)
+            {
+                NS_ASSERT(alloc.m_dci->m_symStart == span.symStart);
+                NS_ASSERT(alloc.m_dci->m_numSym == numSym);
+                allocInfo->m_varTtiAllocInfo.push_back(alloc);
+                auto& ues = beamUes->second;
+                ues.erase(std::remove_if(ues.begin(),
+                                         ues.end(),
+                                         [&alloc](const UePtrAndBufferReq& ue) {
+                                             return ue.first->m_rnti == alloc.m_dci->m_rnti;
+                                         }),
+                          ues.end());
+            }
+        }
+        if (beamUes->second.empty())
+        {
+            activeDlUe->erase(beamUes);
+        }
+    }
+
+    std::stable_sort(allocInfo->m_varTtiAllocInfo.begin(), allocInfo->m_varTtiAllocInfo.end());
 }
 
 std::vector<bool>

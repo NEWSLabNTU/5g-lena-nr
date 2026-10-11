@@ -486,7 +486,7 @@ NrMacSchedulerOfdma::AssignDLRBG(uint32_t symAvail, const ActiveUeMap& activeDl)
         uint32_t beamSym = symPerBeam.at(GetBeamId(el));
         std::vector<UePtrAndBufferReq> ueVector;
         FTResources assignedResources(0, 0);
-        std::vector<bool> availableRbgs = GetDlBitmask();
+        std::vector<bool> availableRbgs = GetDlDataBitmask();
         std::set<uint32_t> remainingRbgSet;
         for (size_t i = 0; i < availableRbgs.size(); i++)
         {
@@ -635,7 +635,7 @@ NrMacSchedulerOfdma::AssignULRBG(uint32_t symAvail, const ActiveUeMap& activeUl)
         std::vector<UePtrAndBufferReq> ueVector;
         FTResources assigned(0, 0);
 
-        std::vector<bool> availableRbgs = GetUlBitmask();
+        std::vector<bool> availableRbgs = GetUlDataBitmask();
         std::set<uint32_t> remainingRbgSet;
         for (size_t i = 0; i < availableRbgs.size(); i++)
         {

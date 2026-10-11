@@ -100,6 +100,38 @@ Bugs fixed
 - Fixed ``NrMacSchedulerOfdma`` checking uplink allocations against the downlink
   notch mask when creating UL DCIs. They are now checked against the uplink one.
   Covered by new UL cases of the ``nr-test-notching`` test suite.
+- Fixed UL HARQ retransmissions each taking their own symbols over the whole band.
+  ``NrMacSchedulerHarqRr::ScheduleUlHarq()`` now places a retransmission on the
+  symbols of one already scheduled in the slot when both have the same symbol
+  count, their UEs share a beam and their RBGs do not overlap, so retransmissions
+  that were frequency multiplexed in their first transmission are no longer
+  serialized in time or deferred to a later slot. Covered by the
+  ``nr-test-sched-harq`` test suite.
+- Fixed UL HARQ retransmissions leaving the rest of the band empty with the OFDMA
+  schedulers. New UL data of UEs in the beam of the retransmissions is now
+  scheduled on the RBGs they leave free, over the same symbols, before the
+  remaining symbols of the slot are allocated. UEs are only placed there when
+  this does not leave the remaining symbols unused. Covered by the
+  ``nr-test-sched-harq`` test suite.
+- Fixed DL HARQ retransmissions leaving the rest of the band empty with the OFDMA
+  schedulers. New DL data of the other UEs in the beam of the retransmissions is
+  now scheduled on the RBGs they leave free, over the same symbols, before the
+  remaining symbols of the slot are allocated. UEs are only placed there when
+  this does not leave the remaining symbols unused. Covered by the
+  ``nr-test-sched-harq`` test suite.
+- Fixed UL HARQ retransmissions being deferred to a later slot when their symbols
+  did not fit in the ones left, although their resources did. Such a retransmission
+  is now reshaped into the fewest symbols left that hold its resources, keeping its
+  MCS and TBS. Covered by the ``nr-test-sched-harq`` test suite.
+- Fixed DL HARQ retransmissions being deferred to a later slot when their RBGs were
+  taken by another retransmission of their beam, or their symbols did not fit in the
+  ones left, although their resources did. Such a retransmission is now reshaped into
+  the fewest symbols left that hold its resources, keeping its MCS and TBS. Covered
+  by the ``nr-test-sched-harq`` test suite.
+- Fixed the OFDMA schedulers placing all the UEs on the RBGs left free by the first
+  HARQ retransmission span of a beam, leaving the following spans empty and some UEs
+  without enough resources for their data. The UEs are now spread over all the spans
+  of the beam. Covered by the ``nr-test-sched-harq`` test suite.
 - Fixed ``ResourceAssignmentMatrix::GetAssignedResourcesToUe()`` reporting every
   resource as ``ResourceType::EMPTY``. It now reports the type each resource was
   assigned with. Covered by the ``nr-resource-assignment-matrix`` test suite.

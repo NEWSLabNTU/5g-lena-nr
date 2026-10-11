@@ -96,6 +96,11 @@ class NR_EXPORT NrMacSchedulerOfdma : public NrMacSchedulerTdma
 
     void ChangeUlBeam(PointInFTPlane* spoint, uint32_t symOfBeam) const override;
 
+    bool CanShareRetxSymbols() const override
+    {
+        return true;
+    }
+
     /**
      * @brief Calculate the number of symbols to assign to each beam by calling using the technique
      * selected in m_symPerBeamType
