@@ -29,7 +29,10 @@
 #include "ns3/uinteger.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <limits>
+#include <map>
 #include <random>
 #include <string>
 #include <unordered_set>
@@ -1931,6 +1934,59 @@ NrGnbPhy::GenerateDataCqiReport(const SpectrumValue& sinr)
     SpectrumValue newSinr = sinr;
     m_ulSinrTrace(0, newSinr, newSinr);
     m_phySapUser->UlCqiReport(ulcqi);
+}
+
+void
+NrGnbPhy::GenerateMimoDataCqiReport(const std::vector<MimoSinrChunk>& mimoChunks)
+{
+    NS_LOG_FUNCTION(this);
+
+    SpectrumValue sinr(m_spectrumPhy->GetRxSpectrumModel());
+    const auto numRbs = sinr.GetValuesN();
+
+    // Per UE: SINR of each RB integrated over time, and the total duration
+    std::map<uint16_t, std::pair<std::vector<double>, double>> perUe;
+    for (const auto& chunk : mimoChunks)
+    {
+        if (chunk.cellId != GetCellId())
+        {
+            continue;
+        }
+        const auto& mat = chunk.mimoSinr;
+        NS_ASSERT(mat.GetNumRbs() == numRbs);
+        const auto rank = mat.GetRank();
+        const auto dur = chunk.dur.GetSeconds();
+        auto& [sinrTime, totalDur] = perUe[chunk.rnti];
+        sinrTime.resize(numRbs, 0.0);
+        for (std::size_t rb = 0; rb < numRbs; ++rb)
+        {
+            // All layers share one MCS: use their geometric mean
+            double logSum = 0.0;
+            for (uint8_t layer = 0; layer < rank; ++layer)
+            {
+                logSum += std::log(std::max(mat(layer, rb), std::numeric_limits<double>::min()));
+            }
+            sinrTime[rb] += std::exp(logSum / rank) * dur;
+        }
+        totalDur += dur;
+    }
+
+    // A UE has no SINR on the RBs it was not allocated, and UL RBs are not shared, so the
+    // per-RB maximum gives each UE's SINR on its own allocation
+    for (const auto& [rnti, ue] : perUe)
+    {
+        const auto& [sinrTime, totalDur] = ue;
+        if (totalDur <= 0.0)
+        {
+            continue;
+        }
+        for (std::size_t rb = 0; rb < numRbs; ++rb)
+        {
+            sinr[rb] = std::max(sinr[rb], sinrTime[rb] / totalDur);
+        }
+    }
+
+    GenerateDataCqiReport(sinr);
 }
 
 void

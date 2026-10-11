@@ -693,10 +693,11 @@ NrHelper::CreateGnbPhy(const Ptr<Node>& n,
     auto phasedChannel = bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel();
     if (!m_snrTest)
     {
-        // TODO: rename to GeneratePuschCqiReport, replace when enabling uplink MIMO
-        pData->AddCallback(MakeCallback(&NrGnbPhy::GenerateDataCqiReport,
-                                        phy)); // connect DATA chunk processor that will
-        // call GenerateDataCqiReport function
+        if (!phasedChannel)
+        {
+            // Without a MIMO channel, the PUSCH CQI comes from the SISO SINR
+            pData->AddCallback(MakeCallback(&NrGnbPhy::GenerateDataCqiReport, phy));
+        }
         pData->AddCallback(MakeCallback(&NrSpectrumPhy::UpdateSinrPerceived,
                                         channelPhy)); // connect DATA chunk processor that will
         // call UpdateSinrPerceived function
@@ -708,6 +709,8 @@ NrHelper::CreateGnbPhy(const Ptr<Node>& n,
             auto pDataMimo = Create<NrMimoChunkProcessor>();
             pDataMimo->AddCallback(
                 MakeCallback(&NrSpectrumPhy::UpdateMimoSinrPerceived, channelPhy));
+            // Use the post-MMSE SINR used for decoding as the PUSCH CQI
+            pDataMimo->AddCallback(MakeCallback(&NrGnbPhy::GenerateMimoDataCqiReport, phy));
             channelPhy->AddDataMimoChunkProcessor(pDataMimo);
         }
     }

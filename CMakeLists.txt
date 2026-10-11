@@ -9,6 +9,7 @@ if(${ENABLE_EIGEN})
   set(eigen_tests
       test/nr-test-csi.cc
       test/nr-test-ri-pmi.cc
+      test/nr-test-ul-mimo-cqi-wiring.cc
   )
 else()
   message(
@@ -540,6 +541,7 @@ set(test_sources
     test/nr-test-sfnsf.cc
     test/nr-test-subband.cc
     test/nr-test-timings.cc
+    test/nr-test-ul-mimo-cqi.cc
     test/nr-uplink-power-control-test.cc
     test/nr-system-scheduler-test-qos.cc
     test/system-scheduler-test.cc

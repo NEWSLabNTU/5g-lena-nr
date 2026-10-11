@@ -10,6 +10,7 @@
 #include "nr-fh-phy-sap.h"
 #include "nr-gnb-cphy-sap.h"
 #include "nr-harq-phy.h"
+#include "nr-mimo-chunk-processor.h"
 #include "nr-phy-sap.h"
 #include "nr-phy.h"
 
@@ -261,13 +262,27 @@ class NR_EXPORT NrGnbPhy : public NrPhy
     void PhyDataPacketReceived(const Ptr<Packet>& p);
 
     /**
-     * @brief Generate a DL CQI report
+     * @brief Generate a PUSCH CQI report
      *
-     * Connected by the helper to a callback in corresponding ChunkProcessor
+     * Connected by the helper to a callback in the SISO data chunk processor
+     * when the channel does not support MIMO
      *
      * @param sinr the SINR
      */
     void GenerateDataCqiReport(const SpectrumValue& sinr);
+
+    /**
+     * @brief Generate a PUSCH CQI report from the post-MMSE MIMO SINR
+     *
+     * Connected by the helper to a callback in the MIMO data chunk processor, so
+     * that UL link adaptation sees the SINR used to decode the transport blocks,
+     * including the receive combining gain of multi-port gNBs. For each UE received
+     * in this cell, the SINR is averaged over the duration of the reception and, if
+     * more than one layer was received, over the layers in dB.
+     *
+     * @param mimoChunks the MIMO SINR chunks of the reception
+     */
+    void GenerateMimoDataCqiReport(const std::vector<MimoSinrChunk>& mimoChunks);
 
     /**
      * @brief Receive a list of CTRL messages
