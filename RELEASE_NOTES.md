@@ -71,9 +71,14 @@ Bugs fixed
   with no entry in the logical channel map; the next uplink grant selected it and
   ``SendNewStatusData()``, ``SendRetxData()`` or ``SendTxData()`` threw while
   looking it up. Such reports are now discarded when they arrive.
-- ``NrMacSchedulerTdma::DoReshapeAllocation()`` could loop without terminating when
-  reshaping a HARQ retransmission whose resource count exceeded the range of its
-  symbol counter, which is reachable at wide bandwidths.
+- Fixed ``NrMacSchedulerTdma::DoReshapeAllocation()`` looping without terminating
+  when reshaping a HARQ retransmission whose resource count exceeded the range of
+  its symbol counter, which is reachable at wide bandwidths, and dividing by zero
+  when no RBGs were free. The reshape no longer requires an exact symbols x RBGs
+  factorisation of the original resource count: it uses the fewest symbols that
+  hold at least that many resources, so retransmissions with no exact shape in the
+  slot are no longer held back. Covered by the new ``nr-test-sched-reshape`` test
+  suite.
 
 Release NR-v5.1
 ---------------

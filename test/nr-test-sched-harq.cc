@@ -384,10 +384,14 @@ NrTestMacSchedulerHarqRrScheduleDlHarq::CheckSchedule(
             auto resultingRbgs = std::count(resultingDci.m_rbgBitmask.begin(),
                                             resultingDci.m_rbgBitmask.end(),
                                             true);
-            NS_TEST_ASSERT_MSG_EQ(resultingRbgs * resultingDci.m_numSym,
-                                  originalRbgs * originalDci.m_numSym,
-                                  "Number of allocated resources should not change (error model "
-                                  "assumes it remains constant)");
+            // The reshaped grant keeps the TBS, so it must hold at least the original
+            // resources, padded by less than one RBG per symbol
+            NS_TEST_ASSERT_MSG_GT_OR_EQ(resultingRbgs * resultingDci.m_numSym,
+                                        originalRbgs * originalDci.m_numSym,
+                                        "Reshaped grant must hold the original resources");
+            NS_TEST_ASSERT_MSG_LT(resultingRbgs * resultingDci.m_numSym,
+                                  originalRbgs * originalDci.m_numSym + resultingDci.m_numSym,
+                                  "Reshaped grant must not pad more than one RBG per symbol");
         }
     }
     // Testing OFDMA

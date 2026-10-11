@@ -289,8 +289,11 @@ NrMacSchedulerHarqRr::ScheduleDlHarq(
             // If allocation reshaping did not work, buffer DCI
             if (reshapedDcis.empty())
             {
-                NS_LOG_INFO("This HARQ allocation collides with a previously allocated HARQ, "
-                            "we have to buffer it");
+                NS_LOG_INFO(
+                    (m_consolidateHarqRetx
+                         ? "This HARQ allocation does not fit in the remaining resources, "
+                         : "This HARQ allocation collides with a previously allocated HARQ, ")
+                    << "we have to buffer it");
                 BufferHARQFeedback(dlHarqFeedback,
                                    dlHarqToRetransmit,
                                    dciInfoReTx->m_rnti,

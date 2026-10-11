@@ -715,31 +715,16 @@ NrMacSchedulerTdma::DoReshapeAllocation(
             continue;
         }
 
-        // Find the smallest symbol count that preserves the resource count using the available
-        // resource block groups. If no shape fits in this slot, leave the HARQ process buffered.
-        // Bound the search by availableSymbols: the former uint8_t counter could wrap at 256
-        // before reaching an exact match and repeat indefinitely.
-        const std::size_t minSymbols =
+        // Use the fewest symbols that hold at least the original number of resources, then the
+        // fewest RBGs for that symbol count. The TBS and MCS are kept, so the transport block
+        // still fits; requiring an exact match instead would decline grants whose resource count
+        // has no factorisation within the slot. If no shape fits in this slot, leave the HARQ
+        // process buffered.
+        const std::size_t selectedSymbols =
             (numResources + allocatedRbgs.size() - 1) / allocatedRbgs.size();
-        std::size_t selectedSymbols = 0;
-        std::size_t selectedRbgs = 0;
-        for (std::size_t symbols = minSymbols; symbols <= availableSymbols; ++symbols)
+        if (selectedSymbols <= availableSymbols)
         {
-            if (numResources % symbols == 0)
-            {
-                const std::size_t rbgs = numResources / symbols;
-                if (rbgs <= allocatedRbgs.size())
-                {
-                    selectedSymbols = symbols;
-                    selectedRbgs = rbgs;
-                    break;
-                }
-            }
-        }
-
-        if (selectedSymbols != 0)
-        {
-            // selectedSymbols <= availableSymbols by construction, so the narrowing is safe
+            const std::size_t selectedRbgs = (numResources + selectedSymbols - 1) / selectedSymbols;
             const auto symbols = static_cast<uint8_t>(selectedSymbols);
             allocatedRbgs.resize(selectedRbgs);
             std::vector<bool> allocatedBitmask(bitmask.size(), false);
