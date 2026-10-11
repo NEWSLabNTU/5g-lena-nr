@@ -58,12 +58,16 @@ class NR_EXPORT NrChannelHelper : public Object
     };
 
     /**
-     * Filter parameters to avoid channel calculation for undesired links.     */
+     * @brief Transmit filters that can be installed on the spectrum channels, to
+     * avoid the channel computation of undesired links. Values can be combined
+     * as a bitmask through the AddFilters attribute.
+     */
     enum Filter : uint8_t
     {
-        CSIRS = 0x01,    //!< Install CSIRS filter; see explanation in nr-csi-rs-filter.h
-        SIDELINK = 0x02, //!< Install ue-ue/gnb-gnb link filter; see explanation in nr-link-filter.h
-    } m_filter{Filter::CSIRS};
+        CSIRS = 0x01,       //!< Install NrCsiRsFilter; see nr-csi-rs-filter.h
+        SIDELINK = 0x02,    //!< Install NrSidelinkFilter; see nr-sidelink-filter.h
+        COEXISTENCE = 0x04, //!< Install NrCoexistenceFilter; see nr-coexistence-filter.h
+    };
 
     /**
      * @brief Default constructor
@@ -285,12 +289,12 @@ class NR_EXPORT NrChannelHelper : public Object
     std::pair<TypeId, TypeId> GetPropagationTypeId() const;
 
     /**
-     * Install filters on the specified spectrum channel, based on the previous
-     * configuration of m_filters.
+     * Install the filters selected by m_filter on the specified spectrum channel.
      * @param channel the spectrum channel instance on which will be installed the filter
      */
     void AddFilters(Ptr<SpectrumChannel> channel) const;
 
+    uint8_t m_filter{Filter::CSIRS};       //!< Bitmask of Filter values to install
     ObjectFactory m_pathLossModel;         //!< The path loss object factory
     ObjectFactory m_spectrumModel;         //!< The phased spectrum object factory
     ObjectFactory m_channelConditionModel; //!< The channel condition object factory

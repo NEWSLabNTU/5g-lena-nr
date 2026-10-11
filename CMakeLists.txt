@@ -95,12 +95,12 @@ set(source_files
     model/nr-cb-type-one.cc
     model/nr-ch-access-manager.cc
     model/nr-chunk-processor.cc
+    model/nr-coexistence-filter.cc
     model/nr-common.cc
     model/nr-component-carrier.cc
     model/nr-control-messages.cc
     model/nr-csi-rs-filter.cc
     model/nr-device-registry.cc
-    model/nr-link-filter.cc
     model/nr-eesm-cc-t1.cc
     model/nr-eesm-cc-t2.cc
     model/nr-eesm-cc.cc
@@ -205,6 +205,7 @@ set(source_files
     model/nr-rrc-protocol-ideal.cc
     model/nr-rrc-protocol-real-gnb.cc
     model/nr-rrc-protocol-real-ue.cc
+    model/nr-sidelink-filter.cc
     model/nr-simple-ue-component-carrier-manager.cc
     model/nr-spectrum-phy.cc
     model/nr-spectrum-signal-parameters.cc
@@ -291,12 +292,12 @@ set(header_files
     model/nr-ccm-rrc-sap.h
     model/nr-ch-access-manager.h
     model/nr-chunk-processor.h
+    model/nr-coexistence-filter.h
     model/nr-common.h
     model/nr-component-carrier.h
     model/nr-control-messages.h
     model/nr-csi-rs-filter.h
     model/nr-device-registry.h
-    model/nr-link-filter.h
     model/nr-eesm-cc-t1.h
     model/nr-eesm-cc-t2.h
     model/nr-eesm-cc.h
@@ -420,6 +421,7 @@ set(header_files
     model/nr-rrc-protocol-real-gnb.h
     model/nr-rrc-protocol-real-ue.h
     model/nr-rrc-sap.h
+    model/nr-sidelink-filter.h
     model/nr-simple-ue-component-carrier-manager.h
     model/nr-spectrum-phy.h
     model/nr-spectrum-signal-parameters.h
@@ -506,6 +508,7 @@ set(test_sources
     test/nr-ue-handover-interference-test.cc
     test/nr-ue-mac-stale-bsr-test.cc
     test/nr-x2-forwarding-drop-test.cc
+    test/nr-transmit-filter-test.cc
     test/nr-test-ipv6-routing.cc
     test/nr-test-l2sm-eesm.cc
     test/nr-test-notching.cc

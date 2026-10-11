@@ -51,6 +51,9 @@ us a note on ns-developers mailing list.
 ## Changes from NR-v5.1 to v5.2
 
 ### New API:
+- Add ``NrSidelinkFilter``, a ``SpectrumTransmitFilter`` that discards gNB-to-gNB and UE-to-UE NR signals, skipping their propagation loss and channel matrix computation. Signals involving non-NR devices are not filtered. It drops sidelink transmissions, so it must not be installed in sidelink scenarios.
+- Add ``NrCoexistenceFilter``, a ``SpectrumTransmitFilter`` that discards the signals exchanged between NR and non-NR devices, skipping their propagation loss and channel matrix computation. It removes the interference between NR and the other technologies, so it must not be installed in coexistence scenarios.
+- Add the ``NrChannelHelper::AddFilters`` attribute, a bitmask of ``NrChannelHelper::Filter`` values (``CSIRS``, ``SIDELINK``, ``COEXISTENCE``) selecting the transmit filters installed on the spectrum channels it creates. It defaults to ``CSIRS`` only, which keeps the previous behavior, and must be set before the channels are created.
 
 ### Changes to Existing API
 - Following the ns-3 spectrum change that passes beamforming vectors explicitly (ns-3 issue #1369), ``NYUSpectrumPropagationLossModel`` and ``DistanceBasedThreeGppSpectrumPropagationLossModel`` overrides of ``DoCalcRxPowerSpectralDensity()`` and ``GetLongTerm()`` take the two beamforming vectors as parameters, and callers of ``CalcRxPowerSpectralDensity()`` and ``DoCalcRxPowerSpectralDensity()`` now pass them (typically ``array->GetBeamformingVector()``) instead of relying on the arrays' current state.

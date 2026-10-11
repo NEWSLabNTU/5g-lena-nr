@@ -10,8 +10,9 @@
 #include "ns3/double.h"
 #include "ns3/enum.h"
 #include "ns3/multi-model-spectrum-channel.h"
+#include "ns3/nr-coexistence-filter.h"
 #include "ns3/nr-csi-rs-filter.h"
-#include "ns3/nr-link-filter.h"
+#include "ns3/nr-sidelink-filter.h"
 #include "ns3/nyu-propagation-loss-model.h"
 #include "ns3/nyu-spectrum-propagation-loss-model.h"
 #include "ns3/object-factory.h"
@@ -100,15 +101,16 @@ NrChannelHelper::GetTypeId()
                                 "SionnaRT"))
             .AddAttribute(
                 "AddFilters",
-                "This attribute adds filters to the created spectrum channels, avoiding channel "
-                "computation for undesired links and reducing computational overhead."
-                "Filters must be specified as a bitmask:"
-                "Filter::CSIRS | Filter::SIDELINK | (...)"
-                "For details about the available filters and their implementation, refer to "
-                "nr-csi-rs-filter.h and nr-link-filter.h."
-                "This attribute must be set BEFORE creating the spectrum channels.",
-                UintegerValue(
-                    Filter::CSIRS), // TODO configure whether to install or not this filter
+                "Bitmask of NrChannelHelper::Filter values selecting the transmit filters "
+                "installed on the created spectrum channels, which skip the channel computation "
+                "of undesired links to reduce the computational overhead "
+                "(e.g., NrChannelHelper::CSIRS | NrChannelHelper::SIDELINK). "
+                "See nr-csi-rs-filter.h, nr-sidelink-filter.h and nr-coexistence-filter.h for "
+                "details on each filter; SIDELINK discards all UE-to-UE signals and must not be "
+                "used in sidelink scenarios, and COEXISTENCE discards all signals between NR and "
+                "non-NR devices and must not be used in coexistence scenarios. It must be set "
+                "before the spectrum channels are created.",
+                UintegerValue(Filter::CSIRS),
                 MakeUintegerAccessor(&NrChannelHelper::m_filter),
                 MakeUintegerChecker<uint8_t>());
     return tid;
@@ -411,38 +413,33 @@ NrChannelHelper::AssignChannelsToBands(
 void
 NrChannelHelper::AddFilters(Ptr<SpectrumChannel> channel) const
 {
-    Ptr<const SpectrumTransmitFilter> p = channel->GetSpectrumTransmitFilter();
-    bool foundCsiRs = false;
-    bool foundSidelink = false;
-    while (p)
+    const std::pair<Filter, TypeId> filters[] = {
+        {Filter::CSIRS, NrCsiRsFilter::GetTypeId()},
+        {Filter::SIDELINK, NrSidelinkFilter::GetTypeId()},
+        {Filter::COEXISTENCE, NrCoexistenceFilter::GetTypeId()},
+    };
+    for (const auto& [flag, tid] : filters)
     {
-        if (!foundCsiRs && (m_filter & Filter::CSIRS) && DynamicCast<const NrCsiRsFilter>(p))
+        if (!(m_filter & flag))
         {
-            foundCsiRs = true;
-            NS_LOG_DEBUG("Found existing NrCsiRsFilter for spectrum channel " << channel);
+            continue;
         }
-        if (!foundSidelink && (m_filter & Filter::SIDELINK) && DynamicCast<const NrLinkFilter>(p))
+        bool found = false;
+        for (Ptr<const SpectrumTransmitFilter> p = channel->GetSpectrumTransmitFilter();
+             p && !found;
+             p = p->GetNext())
         {
-            foundSidelink = true;
-            NS_LOG_DEBUG("Found existing NrLinkFilter for spectrum channel " << channel);
+            auto instanceTid = p->GetInstanceTypeId();
+            found = (instanceTid == tid) || instanceTid.IsChildOf(tid);
         }
-        if (foundCsiRs && foundSidelink)
+        if (found)
         {
-            break;
+            NS_LOG_DEBUG("Found existing " << tid.GetName() << " for spectrum channel " << channel);
+            continue;
         }
-        p = p->GetNext();
-    }
-    if ((m_filter & Filter::CSIRS) && !foundCsiRs)
-    {
-        Ptr<NrCsiRsFilter> pCsiRsFilter = CreateObject<NrCsiRsFilter>();
-        channel->AddSpectrumTransmitFilter(pCsiRsFilter);
-        NS_LOG_DEBUG("Adding NrCsiRsFilter to channel " << channel);
-    }
-    if ((m_filter & Filter::SIDELINK) && !foundSidelink)
-    {
-        Ptr<NrLinkFilter> nrLinkFilter = CreateObject<NrLinkFilter>();
-        channel->AddSpectrumTransmitFilter(nrLinkFilter);
-        NS_LOG_DEBUG("Adding sidelink filter to channel " << channel);
+        ObjectFactory factory(tid.GetName());
+        channel->AddSpectrumTransmitFilter(factory.Create<SpectrumTransmitFilter>());
+        NS_LOG_DEBUG("Adding " << tid.GetName() << " to channel " << channel);
     }
 }
 

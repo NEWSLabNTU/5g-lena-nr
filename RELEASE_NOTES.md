@@ -20,6 +20,26 @@ Release NR-v5.2 (under development)
 
 New user-visible features
 -------------------------
+- Added ``NrSidelinkFilter``, a spectrum transmit filter that drops gNB-to-gNB
+  and UE-to-UE NR signals before the spectrum channel computes their propagation
+  loss and 3GPP channel matrices, so only gNB-to-UE and UE-to-gNB links are
+  evaluated. It reduces the simulation cost of deployments with many nodes, at
+  the price of ignoring gNB-gNB and UE-UE interference; it is intended for TDD
+  patterns made of pure DL and UL slots, and must not be used in sidelink
+  scenarios, since it also drops sidelink transmissions. Signals from or to
+  non-NR devices (e.g., Wi-Fi in coexistence scenarios) are not filtered. It is
+  disabled by default and is enabled with the new ``NrChannelHelper::AddFilters``
+  attribute (``NrChannelHelper::CSIRS | NrChannelHelper::SIDELINK``), set before
+  the spectrum channels are created. Covered by the new ``nr-transmit-filter``
+  test suite.
+- Added ``NrCoexistenceFilter``, a spectrum transmit filter that drops the
+  signals exchanged between NR and non-NR devices (e.g., Wi-Fi), so that the
+  spectrum channel only evaluates the links within each technology. It is meant
+  for simulations where several technologies share a spectrum channel but their
+  mutual interference is not of interest, and must not be used in coexistence
+  scenarios. It is disabled by default and is enabled through
+  ``NrChannelHelper::AddFilters`` with ``NrChannelHelper::COEXISTENCE``. Covered
+  by the ``nr-transmit-filter`` test suite.
 
 Bugs fixed
 ----------

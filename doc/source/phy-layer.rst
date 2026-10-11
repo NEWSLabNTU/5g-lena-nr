@@ -1212,6 +1212,43 @@ which can happen e.g., when two technologies coexist (e.g. NR and Wi-Fi). Additi
 out the signal if the receiving device is not a UE device. ``NrCsiRsFilter`` determines whether CSI-RS signal is
 intended for a specific UE device thanks to holding RNTI of the UE for which it was intended.
 
+A second spectrum filter, called ``NrSidelinkFilter``, discards the signals exchanged between two gNBs or
+between two UEs, so that the spectrum and propagation loss models are only called for the gNB-to-UE and
+UE-to-gNB links. This reduces the computational complexity of scenarios with many devices, since the number
+of gNB-gNB and UE-UE links grows quadratically with the number of gNBs and UEs, respectively. 3GPP calibration
+scenarios typically only consider the links between UEs and gNBs, so this filter can be used to speed up
+such simulations without affecting their results. Signals sent or received by a SpectrumPhy that is not of
+type ``NrSpectrumPhy`` (e.g., in coexistence scenarios with Wi-Fi) are never discarded by ``NrSidelinkFilter``.
+
+Since the gNB-gNB and UE-UE interference is ignored, ``NrSidelinkFilter`` should only be used with a TDD
+pattern composed of pure DL and UL slots, where such interference does not arise. It also discards every
+UE-to-UE transmission, including sidelink, so it must not be used when evaluating sidelink scenarios.
+
+A third spectrum filter, called ``NrCoexistenceFilter``, discards the signals exchanged between an NR device and
+a device of another technology (e.g., Wi-Fi), that is, between an ``NrSpectrumPhy`` and a SpectrumPhy of any other
+type. Signals exchanged between two NR devices, or between two non-NR devices, are not affected. It is useful when
+several technologies share a spectrum channel, but their mutual interference is not of interest, since the
+spectrum and propagation loss models are then only called for the links within each technology. Conversely, it
+removes the interference between NR and the other technologies, so it must not be used when evaluating
+coexistence scenarios.
+
+The filters installed on the spectrum channels created by ``NrChannelHelper`` are selected by its attribute
+``AddFilters``, a bitmask of ``NrChannelHelper::Filter`` values. By default, only ``NrCsiRsFilter`` is
+installed (``NrChannelHelper::CSIRS``). Other filters (``NrChannelHelper::SIDELINK`` for ``NrSidelinkFilter``
+and ``NrChannelHelper::COEXISTENCE`` for ``NrCoexistenceFilter``) are installed by setting the attribute before
+the spectrum channels are created. For example, ``NrCsiRsFilter`` and ``NrSidelinkFilter`` are installed as follows:
+
+.. sourcecode:: cpp
+
+   Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+   channelHelper->SetAttribute("AddFilters",
+                               UintegerValue(NrChannelHelper::CSIRS | NrChannelHelper::SIDELINK));
+   channelHelper->ConfigureFactories("UMi", "Default", "ThreeGpp");
+   channelHelper->AssignChannelsToBands({band});
+
+The ``nr-transmit-filter`` test suite verifies that each combination of filters discards exactly the
+expected signals.
+
 CSI-RS is being transmitted periodically, and the configured period should be a multiply of gNB PHY TDD pattern.
 This is because it can be transmitted only during the slots that contain the DL CTRL (these slot types are downlink,
 flexible, and special). Periodicity is configured per gNB by using the attribute ``CsiRsPeriodicity`` of ``NrGnbPhy``,
