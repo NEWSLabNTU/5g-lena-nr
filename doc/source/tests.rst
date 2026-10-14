@@ -323,6 +323,24 @@ schedulers:
     - Check whether round-robin queue ordering is preserved after removing UEs and respective beams, and adding them back.
     - Check whether PF memory is preserved across subframes, to maintain fairness over time.
 
+Test for HARQ retransmission scheduling
+=======================================
+
+Test suite ``nr-test-sched-harq`` checks how ``NrMacSchedulerHarqRr`` and the schedulers
+place HARQ retransmissions, and the data scheduled next to them, as described in
+:ref:`HarqRetxScheduling`. Each case schedules a single DL or UL slot with hand-built
+HARQ processes and buffers, and checks the DCIs of the slot:
+
+- The round-robin beam order does not overflow when fewer beams are active than were seen.
+- The DL symbol budget does not underflow with retransmissions in several beams, with TDMA and OFDMA.
+- DL retransmissions of a beam share their symbols with OFDMA, with and without ``ConsolidateHarqRetx``.
+- A DL retransmission whose RBGs are taken by another one of its beam, or whose symbols do not fit, is reshaped into the symbols left, keeping its TBS.
+- UL retransmissions share their symbols only when their UEs share a beam and their RBGs do not overlap. Otherwise, a retransmission that does not fit in the symbols left is reshaped into them, keeping its TBS.
+- With OFDMA and UEs in a beam, new UL and DL data use the RBGs left free by a retransmission, over its symbols. With TDMA, or UEs in different beams, the new data gets symbols of its own. A UE never gets new data during its own retransmission.
+- Moving UEs to the free RBGs of a 2 symbol retransmission never lowers the resources used in the slot, for several buffer sizes.
+- New UL data is spread over the free RBGs of two retransmissions of 4 and 6 symbols in a beam, each UE getting a transport block that carries its data, and a UE whose data fits in neither keeps symbols of its own.
+- DL retransmissions are reshaped as expected when ``ConsolidateHarqRetx`` is enabled.
+
 RRC test
 ========
 

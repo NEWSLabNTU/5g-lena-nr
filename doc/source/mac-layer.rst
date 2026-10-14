@@ -105,10 +105,13 @@ The requirement for retransmitting any piece of data is to have enough space (in
 by the number of RBG). This is because, while the retransmission does not need to
 start at the same symbol and RB index as the previous transmission of the same TB,
 it does need the same number of RBGs and MCS, since an adaptive HARQ scheme (where
-the re-transmission can be scheduled with a different MCS) is not implemented. If
-all the symbols are used by the UL retransmissions, the scheduling procedure ends here.
-Otherwise, UL data is scheduled, by assigning the remaining resources (or less) to the
-UEs that have data to transmit. The total number of symbols reserved for UL data is
+the re-transmission can be scheduled with a different MCS) is not implemented.
+Retransmissions that fit side by side in frequency share their symbols. With the OFDMA
+schedulers, UL data is first scheduled on the RBGs that the retransmissions leave free
+over their symbols. If all the symbols are used by the UL retransmissions, the
+scheduling procedure ends here. Otherwise, UL data is scheduled, by assigning the
+remaining resources (or less) to the UEs that have data to transmit. See
+:ref:`HarqRetxScheduling` for the details. The total number of symbols reserved for UL data is
 then stored internally along with the slot number to which these allocations are
 referred, and the procedure for UL ends here.
 
@@ -118,7 +121,9 @@ slot has to be considered during the DL phase. Before evaluating what data can
 be scheduled, that number is extracted from the internal storage, and the DL phase
 can continue only if there are available symbols not used by the UL phase. If it
 is the case, then, the symbols can be distributed by giving priority to the HARQ
-retransmissions, and then to the new data, according to different metrics.
+retransmissions, and then to the new data, according to different metrics. As in the
+UL, the OFDMA schedulers first place new DL data on the RBGs left free by the
+retransmissions, over their symbols.
 
 The base class for OFDMA schedulers is ``NrMacSchedulerOfdma``.
 In the downlink, such class and its subclasses perform
@@ -272,6 +277,278 @@ If this estimate is lower than a previously achieved TBS, the allocation reverts
 and stops scheduling the user.
 
 The test case ``NrSchedOfdmaMcsTestCase`` confirms this behavior works as expected.
+
+
+.. _HarqRetxScheduling:
+
+HARQ retransmission scheduling
+==============================
+HARQ retransmissions are scheduled before new data, by ``NrMacSchedulerHarqRr``. Since
+adaptive HARQ is not implemented, a retransmission keeps the RBGs, the number of symbols,
+the MCS and the TBS of its first transmission. Its RBGs and symbols are kept too, unless
+they do not fit in the slot, in which case it is reshaped into the fewest symbols left that
+hold its resources.
+What the scheduler decides is where in the slot the retransmission goes, and what is done
+with the resources that it leaves free. The following rules apply:
+
+* A UL retransmission is placed on the symbols of a UL retransmission already scheduled
+  in the slot when both have the same number of symbols, both UEs share a beam, and their
+  RBGs do not overlap. Otherwise, it gets symbols of its own. When its symbols do not fit
+  in the ones left, it is reshaped into the fewest of them that hold its resources, over
+  the UL band, keeping its MCS and TBS. Only when even that does not fit is the HARQ
+  feedback kept for the next slot.
+* DL retransmissions of a beam are placed on the same symbols, each with its RBGs. A DL
+  retransmission whose RBGs are taken by another one of its beam, or whose symbols do not
+  fit in the ones left, is reshaped in the same way, into symbols of its own after the
+  ones of every beam. With ``NrMacSchedulerHarqRr::ConsolidateHarqRetx``, every DL
+  retransmission is reshaped into symbols of its own.
+* With the OFDMA schedulers, the RBGs that the retransmissions of a beam leave free over
+  their symbols are given to new data of the other UEs in that beam, for both UL and DL.
+  UEs in another beam cannot use them, since a symbol holds a single beam. The TDMA
+  schedulers give each symbol to a single UE, so they do not do this.
+* A UE never gets new data on the symbols of its own retransmission, as it cannot
+  receive (or transmit) two PDSCHs (or PUSCHs) that overlap in time on a serving cell
+  (TS 38.214, clauses 5.1 and 6.1).
+* A UE gets a single DCI per slot, so a UE placed on the free RBGs of a retransmission
+  cannot use the symbols left after the retransmissions. The retransmission spans of a
+  beam are filled together. Each UE, smallest buffer first, goes to the span in which it
+  gets the most resources, assuming the free RBGs of a span are split evenly among its
+  UEs, as long as that share carries its data and the data of the UEs already there. A UE
+  whose data fits in no span keeps the remaining symbols, unless the UEs left behind
+  already have enough data to fill them, or no symbols remain.
+
+The figures in this section show the slot allocated by the scheduler for the scenarios of
+the ``nr-test-sched-harq`` test suite, plus a few more, before and after these rules were
+introduced. They were drawn from the ``ResourceAssignmentMatrix`` built from the DCIs of the
+slot, as done by ``ResourceAssignmentMatrix::CheckResourceMatrixFromVarTtiAllocInfo()``.
+Each cell is an RBG during an OFDM symbol, labeled with the RNTI of the UE it is assigned
+to. Hatched cells hold a HARQ retransmission, and dark cells hold the DL or UL CTRL
+symbol. The title of each panel gives the RBG x symbols used for data, out of the ones
+that are not used by CTRL nor notched. All scenarios use a 10 or 12 RBG bandwidth,
+the round robin schedulers, and no SRS.
+
+Retransmissions sharing symbols, or reshaped
+############################################
+In :ref:`fig-harq-ul-retx-sharing`, UEs 1 and 2 share a beam and must retransmit an
+8 symbol UL transport block, on RBGs 0 to 4 and 5 to 9, respectively. Both
+retransmissions were frequency multiplexed in their first transmission, but were
+serialized in time when retransmitted. With 13 UL data symbols, only one fitted, and the
+retransmission of UE 2 was deferred to a later slot. Both retransmissions now share
+symbols 5 to 12, as in their first transmission.
+
+.. _fig-harq-ul-retx-sharing:
+
+.. figure:: figures/harq-scheduling/harq-ul-retx-sharing.*
+   :align: center
+   :scale: 60 %
+
+   UL retransmissions of two UEs in a beam, on disjoint RBGs
+
+A retransmission does not share the symbols of another when their RBGs overlap, or when
+the UEs are in different beams. In both cases, shown in :ref:`fig-harq-ul-retx-reshape`,
+the second retransmission does not fit in the 5 symbols left with its 8 symbols, and was
+deferred to a later slot. It is now reshaped into the fewest of those symbols that hold
+its RBGs times symbols over the whole band (5 symbols for the 6 RBGs of the overlapping
+case, 4 symbols for the 5 RBGs of the other), keeping its MCS and TBS.
+
+.. _fig-harq-ul-retx-reshape:
+
+.. figure:: figures/harq-scheduling/harq-ul-retx-reshape.*
+   :align: center
+   :scale: 60 %
+
+   UL retransmissions that cannot share symbols: overlapping RBGs 0 to 5 (top), and UEs
+   in different beams (bottom). The second retransmission is reshaped into the symbols
+   left.
+
+The DL behaves in the same way, as shown in :ref:`fig-harq-dl-retx-reshape`, where UEs 1
+and 2 retransmit an 8 symbol PDSCH on RBGs 0 to 5. With both UEs in a beam, the RBGs of
+the retransmission scheduled second are taken; with UEs in different beams, its 8 symbols do not fit
+in the 5 left after the first beam. It used to be deferred to a later slot, and is now
+reshaped into those 5 symbols.
+
+.. _fig-harq-dl-retx-reshape:
+
+.. figure:: figures/harq-scheduling/harq-dl-retx-reshape.*
+   :align: center
+   :scale: 60 %
+
+   DL retransmissions that cannot keep their shape: overlapping RBGs in a beam (top), and
+   UEs in different beams (bottom). The second retransmission is reshaped into the
+   symbols left.
+
+New data on the RBGs left free by a retransmission
+##################################################
+In :ref:`fig-harq-ul-fill`, UE 1 retransmits an 8 symbol UL transport block on RBGs 0
+to 4, while UE 2, in the same beam, reported 30 bytes of UL data. The rest of the band
+used to stay empty during the retransmission, and UE 2 was given symbols of its own
+before it. UE 2 is now scheduled on RBGs 5 and 6, over the symbols of the
+retransmission, leaving symbols 0 to 4 free.
+
+.. _fig-harq-ul-fill:
+
+.. figure:: figures/harq-scheduling/harq-ul-fill.*
+   :align: center
+   :scale: 60 %
+
+   UL data of UE 2 on the RBGs left free by the UL retransmission of UE 1 (OFDMA)
+
+:ref:`fig-harq-dl-fill` shows the same scenario in the DL, where both UEs have
+100 bytes of new data. UE 2 is now scheduled on the free RBGs over symbols 1 to 8,
+instead of on symbols 9 to 13. UE 1 only gets its retransmission, even though it has
+new data, since it cannot receive two PDSCHs that overlap in time.
+
+.. _fig-harq-dl-fill:
+
+.. figure:: figures/harq-scheduling/harq-dl-fill.*
+   :align: center
+   :scale: 60 %
+
+   DL data of UE 2 on the RBGs left free by the DL retransmission of UE 1 (OFDMA)
+
+With UEs in different beams, or with a TDMA scheduler, UE 2 still gets symbols of its
+own, as shown in :ref:`fig-harq-ul-fill-unchanged` and :ref:`fig-harq-dl-fill-unchanged`.
+
+.. _fig-harq-ul-fill-unchanged:
+
+.. figure:: figures/harq-scheduling/harq-ul-fill-unchanged.*
+   :align: center
+   :scale: 60 %
+
+   UL data that cannot use the free RBGs of the retransmission: UE 2 in another beam
+   (left), and a TDMA scheduler (right). The allocation is unchanged.
+
+.. _fig-harq-dl-fill-unchanged:
+
+.. figure:: figures/harq-scheduling/harq-dl-fill-unchanged.*
+   :align: center
+   :scale: 60 %
+
+   DL data that cannot use the free RBGs of the retransmission: UE 2 in another beam
+   (left), and a TDMA scheduler (right). The allocation is unchanged.
+
+Keeping the rest of the slot in use
+###################################
+Since a UE gets a single DCI per slot, moving a UE to the free RBGs of a retransmission
+must not leave the symbols after it unused. In :ref:`fig-harq-dl-fill-utilization` and
+:ref:`fig-harq-ul-fill-utilization`, UE 1 retransmits on 2 symbols and RBGs 0 and 1, and
+the other UEs of the beam have new data:
+
+* Two UEs with 100000 bytes each (top): one UE is moved to the 8 free RBGs of the
+  retransmission, and the other UE takes the rest of the slot. Every resource is used,
+  where 16 used to stay empty.
+* One UE with 100000 bytes (middle): moving it would leave the 11 or 12 remaining
+  symbols empty, so it keeps them, and the free RBGs of the retransmission stay unused,
+  as before.
+* A UE with 150 bytes and a UE with 100000 bytes (bottom): the UE with less data is
+  moved to the free RBGs of the retransmission, and the other UE takes the rest of the
+  slot.
+
+.. _fig-harq-dl-fill-utilization:
+
+.. figure:: figures/harq-scheduling/harq-dl-fill-utilization.*
+   :align: center
+   :scale: 60 %
+
+   DL utilization with a 2 symbol retransmission and new data of other UEs
+
+.. _fig-harq-ul-fill-utilization:
+
+.. figure:: figures/harq-scheduling/harq-ul-fill-utilization.*
+   :align: center
+   :scale: 60 %
+
+   UL utilization with a 2 symbol retransmission and new data of other UEs
+
+Further examples
+################
+The following scenarios combine the rules above.
+
+In :ref:`fig-harq-ul-shared-retx-fill`, UEs 1 and 2 retransmit 6 symbol UL transport
+blocks on RBGs 0 to 3 and 4 to 7, and UE 3 reported 40 bytes. The two retransmissions
+now share symbols 7 to 12, and UE 3 is placed next to them, on RBGs 8 to 10, instead of
+taking a symbol of its own over the whole band. Seven symbols of the slot are left free.
+
+.. _fig-harq-ul-shared-retx-fill:
+
+.. figure:: figures/harq-scheduling/harq-ul-shared-retx-fill.*
+   :align: center
+   :scale: 60 %
+
+   Two UL retransmissions sharing their symbols, and UL data on the RBGs they leave free
+
+In :ref:`fig-harq-ul-mixed-retx-lengths`, the UL retransmissions of UEs 1 and 2 have 4 and
+6 symbols, so they cannot share symbols even though their RBGs are disjoint. UEs 3 and 4
+reported 20 bytes each, and used to take symbols 0 to 2. Each one now fits on the free
+RBGs of one retransmission, leaving symbols 0 to 2 free.
+
+.. _fig-harq-ul-mixed-retx-lengths:
+
+.. figure:: figures/harq-scheduling/harq-ul-mixed-retx-lengths.*
+   :align: center
+   :scale: 60 %
+
+   UL retransmissions with different numbers of symbols, each with its own symbols, and
+   UL data on the RBGs they leave free
+
+In :ref:`fig-harq-ul-spread-spans`, UE 5 is added to the previous scenario. UEs 3 and 4
+still have 20 bytes each. With 40 bytes, UE 5 shares the free RBGs of the 6 symbol
+retransmission with UE 4, while UE 3 takes the ones of the 4 symbol retransmission, and
+every UE gets a transport block that carries its data, where the three UEs used to take
+symbols 0 to 2. With 60 bytes, UE 5 would not get enough resources in either span to
+carry its reported buffer, so it keeps symbols 0 to 2. Both cases are checked by the
+``nr-test-sched-harq`` test suite.
+
+.. _fig-harq-ul-spread-spans:
+
+.. figure:: figures/harq-scheduling/harq-ul-spread-spans.*
+   :align: center
+   :scale: 60 %
+
+   UL data spread over two retransmission spans of a beam, with 40 bytes (top) and
+   60 bytes (bottom) for UE 5
+
+In :ref:`fig-harq-dl-fill-two-beams`, UE 1 retransmits a 5 symbol DL transport block on
+RBGs 0 to 5 of beam 0, UE 2 has 200 bytes in beam 0, and UE 3 has 2000 bytes in beam 1.
+UE 2 used to take symbol 6 over the whole band. It is now placed on RBGs 6 to 11 of the
+retransmission symbols, leaving one more symbol to beam 1, and every resource of the
+slot is used.
+
+.. _fig-harq-dl-fill-two-beams:
+
+.. figure:: figures/harq-scheduling/harq-dl-fill-two-beams.*
+   :align: center
+   :scale: 60 %
+
+   DL retransmission in beam 0, with new data in beams 0 and 1
+
+In :ref:`fig-harq-dl-fill-small-ues`, UE 1 retransmits a 6 symbol DL transport block on
+RBGs 0 to 2, UEs 2, 3 and 4 have 40 bytes each, and UE 5 has 5000 bytes, all in the same
+beam. UE 4 used to be left without resources, while 9 RBGs stayed empty during the 6
+symbols of the retransmission. The three small UEs now share the free RBGs of the
+retransmission (RBGs 9 to 11 remain free, as their data already fits), and UE 5 takes
+the rest of the slot.
+
+.. _fig-harq-dl-fill-small-ues:
+
+.. figure:: figures/harq-scheduling/harq-dl-fill-small-ues.*
+   :align: center
+   :scale: 60 %
+
+   Several UEs with little data on the RBGs left free by a DL retransmission
+
+In :ref:`fig-harq-ul-fill-notched`, RBGs 4 to 6 are notched (see :ref:`Notching`). UE 1
+retransmits on RBGs 0 to 2, UE 2 reported 40 bytes, and UE 3 reported 3000 bytes. UE 2 is
+moved to the free RBGs of the retransmission, skipping the notched ones, and UE 3 takes
+the symbols before it over the whole allowed band.
+
+.. _fig-harq-ul-fill-notched:
+
+.. figure:: figures/harq-scheduling/harq-ul-fill-notched.*
+   :align: center
+   :scale: 60 %
+
+   UL data on the RBGs left free by a UL retransmission, with notched RBGs
 
 
 Scheduler operation
