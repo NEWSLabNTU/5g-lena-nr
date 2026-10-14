@@ -222,6 +222,13 @@ NrResourceAssignmentMatrixTestCase::DoRun()
         NS_TEST_EXPECT_MSG_EQ(rm.GetNumAssignedResourcesToUe(1),
                               rm.GetAssignedResourcesToUe(1).size(),
                               "Mismatching number of assigned resources");
+        for (const auto& resource : rm.GetAssignedResourcesToUe(0))
+        {
+            NS_TEST_EXPECT_MSG_EQ(
+                (resource.type == ResourceAssignmentMatrix::ResourceType::DL_DATA),
+                true,
+                "Assigned resource must report the type it was assigned with");
+        }
     }
 }
 

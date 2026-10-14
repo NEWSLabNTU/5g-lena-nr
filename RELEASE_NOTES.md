@@ -100,6 +100,9 @@ Bugs fixed
 - Fixed ``NrMacSchedulerOfdma`` checking uplink allocations against the downlink
   notch mask when creating UL DCIs. They are now checked against the uplink one.
   Covered by new UL cases of the ``nr-test-notching`` test suite.
+- Fixed ``ResourceAssignmentMatrix::GetAssignedResourcesToUe()`` reporting every
+  resource as ``ResourceType::EMPTY``. It now reports the type each resource was
+  assigned with. Covered by the ``nr-resource-assignment-matrix`` test suite.
 
 Release NR-v5.1
 ---------------

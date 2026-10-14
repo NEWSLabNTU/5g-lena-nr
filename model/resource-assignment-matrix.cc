@@ -194,7 +194,10 @@ ResourceAssignmentMatrix::GetAssignedResourcesToUe(Rnti rnti)
         {
             if (symbolResource.rbgs.at(rbg).allocatedUe == rnti)
             {
-                ueResources.push_back({symbolResource.beamId, static_cast<uint16_t>(rbg), symbol});
+                ueResources.push_back({symbolResource.beamId,
+                                       static_cast<uint16_t>(rbg),
+                                       symbol,
+                                       symbolResource.rbgs.at(rbg).allocatedResourceType});
             }
         }
         symbol++;
