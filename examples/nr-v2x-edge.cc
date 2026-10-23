@@ -23,7 +23,8 @@
  * Vehicles never reach each other directly; they meet at the edge.
  *
  * UE positions are fixed in R1 (uePositions); phase 022 sets them from
- * CARLA through the radio bridge.
+ * CARLA through the radio bridge. Status lines go to stdout, since NS_LOG is
+ * compiled out of optimized builds.
  */
 
 #include "edge-tunnel-app.h"
@@ -38,6 +39,7 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/tap-bridge-module.h"
 
+#include <iostream>
 #include <sstream>
 #include <vector>
 
@@ -283,20 +285,20 @@ main(int argc, char* argv[])
         edgeTunnel->AddTunnelMapping(Ipv4Address(subnet.str().c_str()),
                                      Ipv4Mask("255.255.255.0"),
                                      ueIps.GetAddress(k));
-        NS_LOG_UNCOND("UE " << k << ": " << tapName.str() << ", vehicle subnet " << subnet.str()
+        std::cout << "UE " << k << ": " << tapName.str() << ", vehicle subnet " << subnet.str()
                             << "/24, NR address " << ueIps.GetAddress(k) << ", position "
-                            << positions[k]);
+                            << positions[k] << std::endl;
     }
     edge->AddApplication(edgeTunnel);
     edgeTunnel->SetStartTime(Seconds(1.0));
     edgeTunnel->SetStopTime(Seconds(simTime));
-    NS_LOG_UNCOND("edge: " << tapEdge << ", RSU subnet 10.1.1.0/24, edge server " << edgeIp);
+    std::cout << "edge: " << tapEdge << ", RSU subnet 10.1.1.0/24, edge server " << edgeIp << std::endl;
 
     nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
 
-    NS_LOG_UNCOND("nr-v2x-edge running: " << numUes << " UEs, " << scenario << " " << condition
+    std::cout << "nr-v2x-edge running: " << numUes << " UEs, " << scenario << " " << condition
                                           << ", " << centralFrequency / 1e9 << " GHz, "
-                                          << bandwidth / 1e6 << " MHz, realtime " << realtime);
+                                          << bandwidth / 1e6 << " MHz, realtime " << realtime << std::endl;
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     Simulator::Destroy();
