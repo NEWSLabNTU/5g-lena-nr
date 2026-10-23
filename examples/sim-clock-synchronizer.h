@@ -36,9 +36,10 @@ namespace ns3
  * kept for the scenario to apply (GetPositions). Between ticks the clock is interpolated at
  * the rate measured over the last ticks and never runs more than one step
  * past the last tick, so it stops when the world stops. It never runs
- * backwards, and a jump of more than ten steps (at least 1 s) is taken as a
- * restart of the external clock and absorbed. Before the first tick ns-3
- * waits.
+ * backwards: a jump of more than ten steps (at least 1 s) either way is
+ * taken as a restart of the external clock (a world that ran unwatched, or a
+ * new episode whose clock starts again from zero) and absorbed as one step.
+ * Before the first tick ns-3 waits.
  */
 class SimClockSynchronizer : public Synchronizer
 {

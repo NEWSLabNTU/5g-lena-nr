@@ -147,23 +147,37 @@ SimClockSynchronizer::Listen()
             m_firstTick = t;
             m_tick = 0;
         }
-        else if (t > m_firstTick + m_tick)
+        else
         {
-            uint64_t rel = t - m_firstTick;
-            uint64_t dSim = rel - m_tick;
+            // The external time of the last tick; m_firstTick is an offset
+            // that may wrap (a backward jump makes it "negative"), so all
+            // arithmetic on it is modulo 2^64 and only differences are used.
+            uint64_t last = m_firstTick + m_tick;
             // A jump far beyond one step is a discontinuity of the external
-            // clock (a restart or a seek), not time that passed: continue
-            // from the last tick as if one step had elapsed, instead of
-            // leaving ns-3 that far behind.
+            // clock, not time that passed: forward a seek or a world that ran
+            // unwatched, backward a new episode (CARLA's clock restarts when
+            // a map is loaded). Continue from the last tick as if one step had
+            // elapsed, instead of leaving ns-3 that far behind or frozen.
             uint64_t jump = std::max<uint64_t>(10 * m_step, 1000000000ULL);
-            if (m_ticks >= 2 && dSim > jump)
+            uint64_t step = m_step;
+            uint64_t rel;
+            uint64_t dSim;
+            if (t > last && !(m_ticks >= 2 && t - last > jump))
             {
-                uint64_t step = m_step > 0 ? m_step : 0;
-                m_firstTick += dSim - step;
+                rel = t - m_firstTick;
+                dSim = rel - m_tick;
+            }
+            else if (m_ticks >= 2 && ((t > last && t - last > jump) || (t < last && last - t > jump)))
+            {
+                m_firstTick = t - m_tick - step;
                 rel = m_tick + step;
                 dSim = step;
                 ++m_jumps;
                 NS_LOG_WARN("external clock jumped; continuing from the last tick");
+            }
+            else
+            {
+                continue; // repeated or old tick
             }
             double dWall =
                 std::chrono::duration<double, std::nano>(wall - m_tickWall).count();
@@ -176,10 +190,6 @@ SimClockSynchronizer::Listen()
             }
             m_step = dSim;
             m_tick = rel;
-        }
-        else
-        {
-            continue; // repeated or old tick
         }
         m_tickWall = wall;
         ++m_ticks;
