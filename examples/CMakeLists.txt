@@ -213,6 +213,7 @@ build_lib_example(
   SOURCE_FILES nr-v2x-edge.cc
                ue-tunnel-app.cc
                edge-tunnel-app.cc
+               sim-clock-synchronizer.cc
   LIBRARIES_TO_LINK ${libnr}
                     ${libtap-bridge}
 )

@@ -22,12 +22,16 @@
  * (it drops packets whose source is not a UE address) out of the way.
  * Vehicles never reach each other directly; they meet at the edge.
  *
+ * With --simClock, ns-3 runs on the external simulator's clock, fed as UDP
+ * ticks (SimClockSynchronizer, phase 022 R2), instead of the wall clock.
+ *
  * UE positions are fixed in R1 (uePositions); phase 022 sets them from
  * CARLA through the radio bridge. Status lines go to stdout, since NS_LOG is
  * compiled out of optimized builds.
  */
 
 #include "edge-tunnel-app.h"
+#include "sim-clock-synchronizer.h"
 #include "ue-tunnel-app.h"
 
 #include "ns3/antenna-module.h"
@@ -95,6 +99,8 @@ main(int argc, char* argv[])
     std::string tapUePrefix = "tap_ue";
     std::string tapEdge = "tap_edge";
     bool realtime = true;
+    bool simClock = false;
+    uint16_t simClockPort = 5600;
     uint32_t rngRun = 1;
 
     CommandLine cmd(__FILE__);
@@ -114,6 +120,8 @@ main(int argc, char* argv[])
     cmd.AddValue("tapUePrefix", "TAP device name prefix for the UEs", tapUePrefix);
     cmd.AddValue("tapEdge", "TAP device name for the edge host", tapEdge);
     cmd.AddValue("realtime", "Run in real time (needed with TAPs)", realtime);
+    cmd.AddValue("simClock", "Follow the external simulator's clock (ticks over UDP) instead of the wall clock", simClock);
+    cmd.AddValue("simClockPort", "UDP port of the external clock's ticks", simClockPort);
     cmd.AddValue("rngRun", "RNG run number", rngRun);
     cmd.Parse(argc, argv);
 
@@ -123,6 +131,14 @@ main(int argc, char* argv[])
         GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
         Config::SetDefault("ns3::RealtimeSimulatorImpl::SynchronizationMode", StringValue("HardLimit"));
         Config::SetDefault("ns3::RealtimeSimulatorImpl::HardLimit", TimeValue(MilliSeconds(500)));
+        if (simClock)
+        {
+            // Needs the SynchronizerType attribute of NEWSLabNTU/ns-3-dev-git,
+            // branch seps-sim-clock.
+            Config::SetDefault("ns3::SimClockSynchronizer::Port", UintegerValue(simClockPort));
+            Config::SetDefault("ns3::RealtimeSimulatorImpl::SynchronizerType",
+                               TypeIdValue(SimClockSynchronizer::GetTypeId()));
+        }
     }
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
     RngSeedManager::SetRun(rngRun);
@@ -298,7 +314,8 @@ main(int argc, char* argv[])
 
     std::cout << "nr-v2x-edge running: " << numUes << " UEs, " << scenario << " " << condition
                                           << ", " << centralFrequency / 1e9 << " GHz, "
-                                          << bandwidth / 1e6 << " MHz, realtime " << realtime << std::endl;
+                                          << bandwidth / 1e6 << " MHz, realtime " << realtime
+                                          << ", clock " << (simClock ? "external" : "wall") << std::endl;
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     Simulator::Destroy();
