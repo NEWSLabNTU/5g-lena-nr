@@ -198,6 +198,12 @@ NrChannelHelper::ConfigurePropagationFactory(TypeId propTypeId)
 }
 
 void
+NrChannelHelper::ConfigureChannelConditionFactory(TypeId conditionTypeId)
+{
+    m_channelConditionModel.SetTypeId(conditionTypeId);
+}
+
+void
 NrChannelHelper::ConfigureSpectrumFactory(TypeId spectrumTypeId)
 {
     m_spectrumModel.SetTypeId(spectrumTypeId);

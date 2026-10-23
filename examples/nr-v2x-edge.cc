@@ -31,6 +31,7 @@
  */
 
 #include "edge-tunnel-app.h"
+#include "external-channel-condition-model.h"
 #include "sim-clock-synchronizer.h"
 #include "ue-tunnel-app.h"
 
@@ -43,6 +44,7 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/tap-bridge-module.h"
 
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -53,6 +55,38 @@ NS_LOG_COMPONENT_DEFINE("NrV2xEdge");
 
 namespace
 {
+
+/// Move each UE to the position the radio bridge last sent (phase 022 R3) and
+/// set its link's condition (R4), every period of simulation time.
+void
+ApplyPositions(Ptr<SimClockSynchronizer> clock, NodeContainer ues, Time period, uint64_t seen)
+{
+    std::vector<Vector> p;
+    uint64_t tick = clock->GetPositions(p);
+    std::vector<uint8_t> c;
+    clock->GetConditions(c);
+    for (uint32_t k = 0; k < ues.GetN() && k < c.size(); ++k)
+    {
+        static const ChannelCondition::LosConditionValue value[] = {ChannelCondition::LOS,
+                                                                   ChannelCondition::NLOS,
+                                                                   ChannelCondition::NLOSv};
+        if (c[k] < 3)
+        {
+            ExternalChannelConditionModel::SetCondition(ues.Get(k)->GetId(), value[c[k]]);
+        }
+    }
+    if (tick != seen)
+    {
+        for (uint32_t k = 0; k < ues.GetN() && k < p.size(); ++k)
+        {
+            if (std::isfinite(p[k].x) && std::isfinite(p[k].y) && std::isfinite(p[k].z))
+            {
+                ues.Get(k)->GetObject<MobilityModel>()->SetPosition(p[k]);
+            }
+        }
+    }
+    Simulator::Schedule(period, &ApplyPositions, clock, ues, period, tick);
+}
 
 /// Parse "x,y;x,y;..." into ground positions at height z.
 std::vector<Vector>
@@ -111,7 +145,10 @@ main(int argc, char* argv[])
     cmd.AddValue("gnbY", "gNB y in m", gnbY);
     cmd.AddValue("gnbHeight", "gNB antenna height in m", gnbHeight);
     cmd.AddValue("scenario", "3GPP TR 38.901 scenario (UMi, UMa, RMa)", scenario);
-    cmd.AddValue("condition", "Channel condition: LOS, NLOS or Default (3GPP draws it)", condition);
+    cmd.AddValue("condition",
+                 "Channel condition: LOS, NLOS, Default (3GPP draws it) or External (the radio "
+                 "bridge's ray casts; needs --simClock)",
+                 condition);
     cmd.AddValue("centralFrequency", "Central frequency in Hz", centralFrequency);
     cmd.AddValue("bandwidth", "Bandwidth in Hz", bandwidth);
     cmd.AddValue("numerology", "NR numerology (0-4)", numerology);
@@ -188,7 +225,13 @@ main(int argc, char* argv[])
     OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
 
     Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
-    channelHelper->ConfigureFactories(scenario, condition, "ThreeGpp");
+    bool external = condition == "External";
+    NS_ABORT_MSG_IF(external && !simClock, "--condition=External needs --simClock");
+    channelHelper->ConfigureFactories(scenario, external ? "Default" : condition, "ThreeGpp");
+    if (external)
+    {
+        channelHelper->ConfigureChannelConditionFactory(ExternalChannelConditionModel::GetTypeId());
+    }
     channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
     channelHelper->AssignChannelsToBands({band});
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
@@ -311,6 +354,16 @@ main(int argc, char* argv[])
     std::cout << "edge: " << tapEdge << ", RSU subnet 10.1.1.0/24, edge server " << edgeIp << std::endl;
 
     nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
+
+    if (simClock)
+    {
+        // The synchronizer the simulator created from SynchronizerType.
+        PointerValue syncPtr;
+        Simulator::GetImplementation()->GetAttribute("Synchronizer", syncPtr);
+        Ptr<SimClockSynchronizer> clock = syncPtr.Get<SimClockSynchronizer>();
+        NS_ABORT_MSG_IF(!clock, "the simulator does not run a SimClockSynchronizer");
+        Simulator::Schedule(MilliSeconds(10), &ApplyPositions, clock, ueNodes, MilliSeconds(10), uint64_t{0});
+    }
 
     std::cout << "nr-v2x-edge running: " << numUes << " UEs, " << scenario << " " << condition
                                           << ", " << centralFrequency / 1e9 << " GHz, "

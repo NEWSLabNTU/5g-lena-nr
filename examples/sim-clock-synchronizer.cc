@@ -50,6 +50,8 @@ SimClockSynchronizer::SimClockSynchronizer()
       m_step(0),
       m_ticks(0),
       m_jumps(0),
+      m_positionsTick(0),
+      m_conditionsTick(0),
       m_originPending(true),
       m_origin(0),
       m_last(0),
@@ -93,6 +95,22 @@ SimClockSynchronizer::GetLastTick() const
 }
 
 uint64_t
+SimClockSynchronizer::GetPositions(std::vector<Vector>& out) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    out = m_positions;
+    return m_positionsTick;
+}
+
+uint64_t
+SimClockSynchronizer::GetConditions(std::vector<uint8_t>& out) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    out = m_conditions;
+    return m_conditionsTick;
+}
+
+uint64_t
 SimClockSynchronizer::GetTickCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -104,7 +122,7 @@ SimClockSynchronizer::Listen()
 {
     timeval tv{0, 200000}; // wake up to notice m_stop
     setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    uint8_t buf[64];
+    uint8_t buf[2048];
     while (true)
     {
         ssize_t n = recv(m_socket, buf, sizeof(buf), 0);
@@ -165,6 +183,27 @@ SimClockSynchronizer::Listen()
         }
         m_tickWall = wall;
         ++m_ticks;
+        if (n >= 12)
+        {
+            uint32_t count = 0;
+            std::memcpy(&count, buf + 8, 4); // little-endian hosts only
+            if (n >= static_cast<ssize_t>(12 + 12 * count))
+            {
+                m_positions.resize(count);
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    float c[3];
+                    std::memcpy(c, buf + 12 + 12 * i, 12);
+                    m_positions[i] = Vector(c[0], c[1], c[2]);
+                }
+                m_positionsTick = m_ticks;
+                if (n >= static_cast<ssize_t>(12 + 13 * count))
+                {
+                    m_conditions.assign(buf + 12 + 12 * count, buf + 12 + 13 * count);
+                    m_conditionsTick = m_ticks;
+                }
+            }
+        }
         if (m_originPending)
         {
             m_originPending = false;

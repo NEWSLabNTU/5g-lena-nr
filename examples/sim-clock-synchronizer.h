@@ -6,12 +6,14 @@
 #define SIM_CLOCK_SYNCHRONIZER_H
 
 #include "ns3/synchronizer.h"
+#include "ns3/vector.h"
 
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace ns3
 {
@@ -28,7 +30,10 @@ namespace ns3
  *
  * The clock is fed over UDP (Port): each datagram carries one tick's
  * simulation time in nanoseconds, a little-endian uint64, optionally followed
- * by more bytes that are ignored. Between ticks the clock is interpolated at
+ * by the radio bridge's positions: a little-endian uint32 count n and n
+ * float32 triples x, y, z in metres (ns-3's frame; NaN for a UE whose vehicle
+ * is absent), then n condition bytes (0 LOS, 1 NLOS, 2 NLOSv, 255 unknown),
+ * kept for the scenario to apply (GetPositions). Between ticks the clock is interpolated at
  * the rate measured over the last ticks and never runs more than one step
  * past the last tick, so it stops when the world stops. It never runs
  * backwards, and a jump of more than ten steps (at least 1 s) is taken as a
@@ -48,6 +53,23 @@ class SimClockSynchronizer : public Synchronizer
 
     /// Ticks received so far.
     uint64_t GetTickCount() const;
+
+    /**
+     * The positions of the last tick that carried them.
+     *
+     * @param [out] out One entry per UE; NaN where the vehicle was absent.
+     * @return The number of ticks received when they arrived (0 for none),
+     *         so that a caller can tell whether they changed.
+     */
+    uint64_t GetPositions(std::vector<Vector>& out) const;
+
+    /**
+     * The link conditions of the last tick that carried them.
+     *
+     * @param [out] out One byte per UE: 0 LOS, 1 NLOS, 2 NLOSv, 255 unknown.
+     * @return As for GetPositions.
+     */
+    uint64_t GetConditions(std::vector<uint8_t>& out) const;
 
   protected:
     bool DoRealtime() override;
@@ -85,6 +107,10 @@ class SimClockSynchronizer : public Synchronizer
     uint64_t m_step;          ///< last tick interval in external ns
     uint64_t m_ticks;
     uint64_t m_jumps;         ///< discontinuities absorbed
+    std::vector<Vector> m_positions;
+    uint64_t m_positionsTick; ///< m_ticks when m_positions arrived
+    std::vector<uint8_t> m_conditions;
+    uint64_t m_conditionsTick;
 
     bool m_originPending;     ///< origin set before the first tick
     uint64_t m_origin;        ///< clock value at the origin (ns)

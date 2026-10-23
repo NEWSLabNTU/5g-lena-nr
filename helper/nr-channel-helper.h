@@ -94,6 +94,14 @@ class NrChannelHelper : public Object
     void ConfigurePropagationFactory(TypeId pathLossTypeId);
 
     /**
+     * @brief This function configures the channel condition object factory. It is used to set
+     * the object factory manually, in case you want to use a custom channel condition model.
+     * Call it after ConfigureFactories, which sets the scenario's condition model.
+     * @param conditionTypeId The TypeId of the channel condition model
+     */
+    void ConfigureChannelConditionFactory(TypeId conditionTypeId);
+
+    /**
      * @brief This function creates a spectrum channel with the given flags
      * @param flags The flags to initialize the spectrum channel. By default, it initializes the
      * propagation and fading models, but you can choose to initialize only the propagation model or
