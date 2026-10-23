@@ -134,6 +134,7 @@ main(int argc, char* argv[])
     std::string tapEdge = "tap_edge";
     bool realtime = true;
     bool simClock = false;
+    bool rlfDetection = false;
     uint16_t simClockPort = 5600;
     uint32_t rngRun = 1;
 
@@ -159,6 +160,10 @@ main(int argc, char* argv[])
     cmd.AddValue("realtime", "Run in real time (needed with TAPs)", realtime);
     cmd.AddValue("simClock", "Follow the external simulator's clock (ticks over UDP) instead of the wall clock", simClock);
     cmd.AddValue("simClockPort", "UDP port of the external clock's ticks", simClockPort);
+    cmd.AddValue("rlfDetection",
+                 "Detect radio link failures; ns-3's UE then stays detached, where a real modem "
+                 "would reattach, so it is off by default and a lost link comes back with the signal",
+                 rlfDetection);
     cmd.AddValue("rngRun", "RNG run number", rngRun);
     cmd.Parse(argc, argv);
 
@@ -246,6 +251,8 @@ main(int argc, char* argv[])
 
     nrHelper->SetGnbPhyAttribute("TxPower", DoubleValue(gnbTxPower));
     nrHelper->SetGnbPhyAttribute("Numerology", UintegerValue(numerology));
+
+    Config::SetDefault("ns3::NrUePhy::EnableRlfDetection", BooleanValue(rlfDetection));
 
     // Unacknowledged RLC: a lost transport block is lost, not delayed.
     Config::SetDefault("ns3::NrGnbRrc::EpsBearerToRlcMapping", EnumValue(NrGnbRrc::RLC_UM_ALWAYS));
