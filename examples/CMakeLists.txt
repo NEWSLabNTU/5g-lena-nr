@@ -207,3 +207,12 @@ if(opengym
                       ${libflow-monitor}
   )
 endif()
+
+build_lib_example(
+  NAME nr-v2x-edge
+  SOURCE_FILES nr-v2x-edge.cc
+               ue-tunnel-app.cc
+               edge-tunnel-app.cc
+  LIBRARIES_TO_LINK ${libnr}
+                    ${libtap-bridge}
+)
