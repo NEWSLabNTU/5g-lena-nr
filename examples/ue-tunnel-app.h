@@ -84,6 +84,20 @@ class UeTunnelApp : public Application
     void SetHandoverActive(bool active);
 
     /**
+     * @brief Take the UE out of service or put it back (the reattach model of
+     * nr-v2x-edge): while out of service every packet is dropped, both ways,
+     * as for a modem that has declared a radio link failure and not yet
+     * reattached.
+     * @param out Whether the UE is out of service
+     */
+    void SetOutOfService(bool out);
+
+    /**
+     * @brief Packets dropped while out of service, both directions
+     */
+    uint64_t GetOutOfServiceDrops() const;
+
+    /**
      * @brief Set handover window for blackout model
      *
      * Sets up the handover interruption window for realistic latency modeling.
@@ -175,6 +189,8 @@ class UeTunnelApp : public Application
 
     // Handover state for latency measurement
     bool m_handoverActive;
+    bool m_outOfService;      // reattach model: drop everything while true
+    uint64_t m_outOfServiceDrops;
 
     // Handover blackout model parameters
     Time m_handoverStartTime;      // When handover started

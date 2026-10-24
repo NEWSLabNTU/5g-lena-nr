@@ -59,6 +59,13 @@ ExternalChannelConditionModel::SetCondition(uint32_t ueNodeId, ChannelCondition:
     Table()[ueNodeId] = c;
 }
 
+int
+ExternalChannelConditionModel::GetCondition(uint32_t ueNodeId)
+{
+    auto it = Table().find(ueNodeId);
+    return it == Table().end() ? -1 : static_cast<int>(it->second);
+}
+
 Ptr<ChannelCondition>
 ExternalChannelConditionModel::GetChannelCondition(Ptr<const MobilityModel> a,
                                                    Ptr<const MobilityModel> b) const

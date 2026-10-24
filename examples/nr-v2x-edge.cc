@@ -45,6 +45,7 @@
 #include "ns3/tap-bridge-module.h"
 
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -88,6 +89,143 @@ ApplyPositions(Ptr<SimClockSynchronizer> clock, NodeContainer ues, Time period, 
     Simulator::Schedule(period, &ApplyPositions, clock, ues, period, tick);
 }
 
+/// Each UE's radio between two trace rows, and its state in the reattach model.
+struct UeRadio
+{
+    double ctrlSinrSum = 0;   ///< linear, over the DL control SINR reports
+    uint32_t ctrlSinrN = 0;
+    double lossSum = 0;       ///< dB, DL control coupling loss (path loss less gains)
+    uint32_t lossN = 0;
+    double lastLoss = NAN;    ///< dB, the latest coupling loss
+    Time belowSince = Time::Max(); ///< since when the link quality is below Qout
+    Time goodSince = Time::Max();  ///< out of service: since when it is back above Qout
+    bool outOfService = false;
+    uint32_t failures = 0;
+    Ptr<UeTunnelApp> tunnel;
+};
+
+std::vector<UeRadio> g_radio;
+std::map<uint32_t, uint32_t> g_ueByNode; ///< node id -> UE index
+double g_qoutDb = -8.0;
+Time g_t310 = Seconds(1);
+Time g_reattach = Seconds(0); ///< zero: the model is off
+double g_ueTxPowerDbm = 23.0;
+double g_ulNoiseDbm = -174.0 + 10 * std::log10(360e3) + 5.0; ///< thermal over one RB, gNB NF 5 dB
+
+/// The uplink's SNR in one resource block, estimated from the DL coupling loss
+/// by reciprocity (UE power less loss less noise): what the UE has for a
+/// scheduling request or a small grant, with all its power in that block. The
+/// uplink is the weaker direction (23 dBm against the gNB's 30 dBm), and ns-3
+/// reports no uplink SINR when the UE sends nothing.
+double
+UlSnrEstimateDb(const UeRadio& r)
+{
+    return g_ueTxPowerDbm - r.lastLoss - g_ulNoiseDbm;
+}
+
+/// While out of service, every 10 ms: back in service once the link has been
+/// good again for the reattach time (cell found again, then RRC set-up).
+void
+Reattach(uint32_t k)
+{
+    UeRadio& r = g_radio[k];
+    if (r.goodSince == Time::Max() || Simulator::Now() - r.goodSince < g_reattach)
+    {
+        Simulator::Schedule(MilliSeconds(10), &Reattach, k);
+        return;
+    }
+    r.outOfService = false;
+    r.tunnel->SetOutOfService(false);
+}
+
+/// DL control SINR (linear), every slot: the trace, and radio link monitoring
+/// for the reattach model. A UE whose link quality, the weaker of the DL
+/// control SINR and the estimated UL SNR, stays below Qout for T310 declares a
+/// radio link failure and is out of service until the link has been good again
+/// for the reattach time (own simplification of TS 38.331's N310/T310, of
+/// uplink failure through scheduling requests and random access, and of RRC
+/// re-establishment).
+void
+OnCtrlSinr(uint32_t k, uint16_t, uint16_t, double sinr, uint16_t)
+{
+    UeRadio& r = g_radio[k];
+    r.ctrlSinrSum += sinr;
+    ++r.ctrlSinrN;
+    Time now = Simulator::Now();
+    double quality = 10 * std::log10(sinr);
+    if (std::isfinite(r.lastLoss))
+    {
+        quality = std::min(quality, UlSnrEstimateDb(r));
+    }
+    if (quality >= g_qoutDb)
+    {
+        r.belowSince = Time::Max();
+        if (r.outOfService && r.goodSince == Time::Max())
+        {
+            r.goodSince = now;
+        }
+        return;
+    }
+    r.goodSince = Time::Max();
+    if (r.belowSince == Time::Max())
+    {
+        r.belowSince = now;
+    }
+    if (g_reattach.IsStrictlyPositive() && !r.outOfService && now - r.belowSince >= g_t310)
+    {
+        r.outOfService = true;
+        ++r.failures;
+        r.tunnel->SetOutOfService(true);
+        Simulator::Schedule(MilliSeconds(10), &Reattach, k);
+    }
+}
+
+void
+OnCtrlLoss(uint16_t, uint8_t, uint32_t node, double lossDb)
+{
+    auto it = g_ueByNode.find(node);
+    if (it != g_ueByNode.end())
+    {
+        g_radio[it->second].lossSum += lossDb;
+        ++g_radio[it->second].lossN;
+        g_radio[it->second].lastLoss = lossDb;
+    }
+}
+
+/// One row per UE every period of simulation time: ns-3's time, the world's
+/// (the last tick's, relative to the first), the UE's position and link
+/// condition, its distance to the gNB, mean DL control SINR and coupling loss
+/// over the period, the UL SNR that loss implies, its service state, failures
+/// and drops.
+void
+TraceRadio(std::ofstream* out,
+           Ptr<SimClockSynchronizer> clock,
+           NodeContainer ues,
+           Vector gnb,
+           Time period)
+{
+    double world = clock ? clock->GetLastTick() / 1e9 : NAN;
+    for (uint32_t k = 0; k < ues.GetN(); ++k)
+    {
+        UeRadio& r = g_radio[k];
+        Vector p = ues.Get(k)->GetObject<MobilityModel>()->GetPosition();
+        int cond = ExternalChannelConditionModel::GetCondition(ues.Get(k)->GetId());
+        double sinrDb = r.ctrlSinrN ? 10 * std::log10(r.ctrlSinrSum / r.ctrlSinrN) : NAN;
+        double loss = r.lossN ? r.lossSum / r.lossN : NAN;
+        double ulSnr = g_ueTxPowerDbm - loss - g_ulNoiseDbm;
+        *out << Simulator::Now().GetSeconds() << "," << world << "," << k << "," << p.x << ","
+             << p.y << "," << p.z << "," << cond << "," << CalculateDistance(p, gnb) << ","
+             << sinrDb << "," << loss << "," << ulSnr << "," << (r.outOfService ? 0 : 1) << "," << r.failures
+             << "," << r.tunnel->GetOutOfServiceDrops() << "\n";
+        r.ctrlSinrSum = 0;
+        r.ctrlSinrN = 0;
+        r.lossSum = 0;
+        r.lossN = 0;
+    }
+    out->flush();
+    Simulator::Schedule(period, &TraceRadio, out, clock, ues, gnb, period);
+}
+
 /// Parse "x,y;x,y;..." into ground positions at height z.
 std::vector<Vector>
 ParsePositions(const std::string& s, double z)
@@ -129,7 +267,8 @@ main(int argc, char* argv[])
     double bandwidth = 20e6;
     uint16_t numerology = 1;
     double gnbTxPower = 30.0;
-    double simTime = 3600.0;
+    double ueTxPower = 23.0;
+    double simTime = 86400.0;
     std::string tapUePrefix = "tap_ue";
     std::string tapEdge = "tap_edge";
     bool realtime = true;
@@ -137,6 +276,11 @@ main(int argc, char* argv[])
     bool rlfDetection = false;
     uint16_t simClockPort = 5600;
     uint32_t rngRun = 1;
+    std::string traceFile = "";
+    double tracePeriod = 0.1;
+    double reattachTime = 0.0;
+    double qout = -8.0;
+    double t310 = 1.0;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("numUes", "Number of UEs, each tapped as <tapUePrefix><k>", numUes);
@@ -154,6 +298,7 @@ main(int argc, char* argv[])
     cmd.AddValue("bandwidth", "Bandwidth in Hz", bandwidth);
     cmd.AddValue("numerology", "NR numerology (0-4)", numerology);
     cmd.AddValue("gnbTxPower", "gNB TX power in dBm", gnbTxPower);
+    cmd.AddValue("ueTxPower", "UE TX power in dBm (23: power class 3; ns-3's own default is 2)", ueTxPower);
     cmd.AddValue("simTime", "Simulation time in s", simTime);
     cmd.AddValue("tapUePrefix", "TAP device name prefix for the UEs", tapUePrefix);
     cmd.AddValue("tapEdge", "TAP device name for the edge host", tapEdge);
@@ -165,6 +310,15 @@ main(int argc, char* argv[])
                  "would reattach, so it is off by default and a lost link comes back with the signal",
                  rlfDetection);
     cmd.AddValue("rngRun", "RNG run number", rngRun);
+    cmd.AddValue("traceFile", "CSV of each UE's radio every tracePeriod of simulation time (empty: none)", traceFile);
+    cmd.AddValue("tracePeriod", "Trace period in s of simulation time", tracePeriod);
+    cmd.AddValue("reattachTime",
+                 "Reattach model: a UE whose link quality (DL control SINR, estimated UL SNR in one "
+                 "RB) stays below qout for t310 is out of service until it has been above qout "
+                 "again for this many s (0: off)",
+                 reattachTime);
+    cmd.AddValue("qout", "Reattach model: out-of-sync threshold on the DL control SINR in dB", qout);
+    cmd.AddValue("t310", "Reattach model: time below qout before a radio link failure, in s", t310);
     cmd.Parse(argc, argv);
 
     // The simulator implementation must be chosen before any ns-3 object exists.
@@ -251,6 +405,7 @@ main(int argc, char* argv[])
 
     nrHelper->SetGnbPhyAttribute("TxPower", DoubleValue(gnbTxPower));
     nrHelper->SetGnbPhyAttribute("Numerology", UintegerValue(numerology));
+    nrHelper->SetUePhyAttribute("TxPower", DoubleValue(ueTxPower));
 
     Config::SetDefault("ns3::NrUePhy::EnableRlfDetection", BooleanValue(rlfDetection));
 
@@ -260,6 +415,20 @@ main(int argc, char* argv[])
 
     NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
     NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
+    g_qoutDb = qout;
+    g_t310 = Seconds(t310);
+    g_reattach = Seconds(reattachTime);
+    g_ueTxPowerDbm = ueTxPower;
+    g_ulNoiseDbm = -174.0 + 10 * std::log10(12 * 15e3 * (1 << numerology)) + 5.0; // one RB
+    g_radio.resize(numUes);
+    for (uint32_t k = 0; k < numUes; ++k)
+    {
+        g_ueByNode[ueNodes.Get(k)->GetId()] = k;
+        Ptr<NrUePhy> phy = DynamicCast<NrUeNetDevice>(ueDevs.Get(k))->GetPhy(0);
+        phy->TraceConnectWithoutContext("DlCtrlSinr", MakeBoundCallback(&OnCtrlSinr, k));
+        phy->GetSpectrumPhy()->EnableDlCtrlPathlossTrace();
+        phy->GetSpectrumPhy()->TraceConnectWithoutContext("DlCtrlPathloss", MakeCallback(&OnCtrlLoss));
+    }
 
     InternetStackHelper internet;
     internet.Install(ueNodes);
@@ -345,6 +514,7 @@ main(int argc, char* argv[])
         ueTunnel->SetTunnelEndpoint(edgeIp, 5000);
         ueTunnel->SetLocalPort(5000);
         ueNodes.Get(k)->AddApplication(ueTunnel);
+        g_radio[k].tunnel = ueTunnel;
         ueTunnel->SetStartTime(Seconds(1.0));
         ueTunnel->SetStopTime(Seconds(simTime));
 
@@ -362,20 +532,38 @@ main(int argc, char* argv[])
 
     nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
 
+    Ptr<SimClockSynchronizer> clock;
     if (simClock)
     {
         // The synchronizer the simulator created from SynchronizerType.
         PointerValue syncPtr;
         Simulator::GetImplementation()->GetAttribute("Synchronizer", syncPtr);
-        Ptr<SimClockSynchronizer> clock = syncPtr.Get<SimClockSynchronizer>();
+        clock = syncPtr.Get<SimClockSynchronizer>();
         NS_ABORT_MSG_IF(!clock, "the simulator does not run a SimClockSynchronizer");
         Simulator::Schedule(MilliSeconds(10), &ApplyPositions, clock, ueNodes, MilliSeconds(10), uint64_t{0});
+    }
+    std::ofstream trace;
+    if (!traceFile.empty())
+    {
+        trace.open(traceFile);
+        NS_ABORT_MSG_IF(!trace, "cannot write " << traceFile);
+        trace << "t_ns3,t_world,ue,x,y,z,condition,distance_m,ctrl_sinr_db,coupling_loss_db,"
+                 "ul_snr_rb_db,in_service,failures,oos_drops\n";
+        Simulator::Schedule(Seconds(tracePeriod),
+                            &TraceRadio,
+                            &trace,
+                            clock,
+                            ueNodes,
+                            Vector(gnbX, gnbY, gnbHeight),
+                            Seconds(tracePeriod));
     }
 
     std::cout << "nr-v2x-edge running: " << numUes << " UEs, " << scenario << " " << condition
                                           << ", " << centralFrequency / 1e9 << " GHz, "
                                           << bandwidth / 1e6 << " MHz, realtime " << realtime
-                                          << ", clock " << (simClock ? "external" : "wall") << std::endl;
+                                          << ", clock " << (simClock ? "external" : "wall")
+                                          << ", reattach model "
+                                          << (reattachTime > 0 ? "on" : "off") << std::endl;
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     Simulator::Destroy();

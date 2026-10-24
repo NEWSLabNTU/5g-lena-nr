@@ -44,6 +44,8 @@ UeTunnelApp::UeTunnelApp()
       m_txPackets(0),
       m_rxPackets(0),
       m_handoverActive(false),
+      m_outOfService(false),
+      m_outOfServiceDrops(0),
       m_handoverStartTime(Time(0)),
       m_handoverEndTime(Time(0)),
       m_networkDelayMs(20.0),
@@ -127,6 +129,18 @@ UeTunnelApp::SetHandoverActive(bool active)
     {
         m_handoverWindowValid = false;
     }
+}
+
+void
+UeTunnelApp::SetOutOfService(bool out)
+{
+    m_outOfService = out;
+}
+
+uint64_t
+UeTunnelApp::GetOutOfServiceDrops() const
+{
+    return m_outOfServiceDrops;
 }
 
 void
@@ -333,6 +347,12 @@ UeTunnelApp::ReceiveFromInner(Ptr<NetDevice> device,
                   << " " << srcAddr << " -> " << dstAddr << " size=" << packet->GetSize()
                   << (m_handoverActive ? " [HANDOVER_ACTIVE]" : ""));
 
+    if (m_outOfService)
+    {
+        ++m_outOfServiceDrops;
+        return true; // consumed: no radio link to send it on
+    }
+
     // Tunnel this packet - send the complete IP packet
     SendToTunnel(packet);
 
@@ -392,6 +412,11 @@ UeTunnelApp::ReceiveFromTunnel(Ptr<Socket> socket)
             return;
         }
 
+        if (m_outOfService)
+        {
+            ++m_outOfServiceDrops;
+            continue;
+        }
         if (InetSocketAddress::IsMatchingType(from))
         {
             InetSocketAddress address = InetSocketAddress::ConvertFrom(from);

@@ -34,6 +34,10 @@ class ExternalChannelConditionModel : public ChannelConditionModel
     /// Set the condition of the link of the UE on node ueNodeId.
     static void SetCondition(uint32_t ueNodeId, ChannelCondition::LosConditionValue c);
 
+    /// The condition last set for the UE on node ueNodeId, as reported (0 LOS,
+    /// 1 NLOS, 2 NLOSv), or -1 if none was set yet.
+    static int GetCondition(uint32_t ueNodeId);
+
     Ptr<ChannelCondition> GetChannelCondition(Ptr<const MobilityModel> a,
                                               Ptr<const MobilityModel> b) const override;
     int64_t AssignStreams(int64_t stream) override;
