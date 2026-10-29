@@ -24,6 +24,8 @@
  *
  * With --simClock, ns-3 runs on the external simulator's clock, fed as UDP
  * ticks (SimClockSynchronizer, phase 022 R2), instead of the wall clock.
+ * With --lockstep as well, the external simulator's tick gate holds each
+ * tick until ns-3 has run the previous frame's interval (phase 024).
  *
  * UE positions are fixed in R1 (uePositions); phase 022 sets them from
  * CARLA through the radio bridge. Status lines go to stdout, since NS_LOG is
@@ -48,6 +50,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 using namespace ns3;
@@ -252,6 +255,15 @@ ParsePositions(const std::string& s, double z)
 
 } // namespace
 
+/// Test of the lockstep (phase 024): sleep in one event for ms of wall time,
+/// every period of simulation time, as a slow channel computation would.
+void
+Stall(Time period, double ms)
+{
+    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<int64_t>(ms * 1000)));
+    Simulator::Schedule(period, &Stall, period, ms);
+}
+
 int
 main(int argc, char* argv[])
 {
@@ -281,6 +293,11 @@ main(int argc, char* argv[])
     double reattachTime = 0.0;
     double qout = -8.0;
     double t310 = 1.0;
+    std::string lockstep = "";
+    double simClockRate = 0.0;
+    double stallEvery = 0.0;
+    double stallMs = 200.0;
+    std::string simClockTrace = "";
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("numUes", "Number of UEs, each tapped as <tapUePrefix><k>", numUes);
@@ -305,6 +322,20 @@ main(int argc, char* argv[])
     cmd.AddValue("realtime", "Run in real time (needed with TAPs)", realtime);
     cmd.AddValue("simClock", "Follow the external simulator's clock (ticks over UDP) instead of the wall clock", simClock);
     cmd.AddValue("simClockPort", "UDP port of the external clock's ticks", simClockPort);
+    cmd.AddValue("lockstep",
+                 "The external simulator's tick gate (host:port): it then holds each tick until "
+                 "ns-3 has run the previous frame's interval (needs --simClock; phase 024)",
+                 lockstep);
+    cmd.AddValue("simClockRate",
+                 "Pace within a frame, simulation s per wall s (0: measured; 1 by default with "
+                 "--lockstep)",
+                 simClockRate);
+    cmd.AddValue("stallEvery",
+                 "Test: every this many s of simulation time, one event sleeps stallMs of wall "
+                 "time (0: never)",
+                 stallEvery);
+    cmd.AddValue("stallMs", "Test: the stall's wall time in ms", stallMs);
+    cmd.AddValue("simClockTrace", "CSV of the external clock, one line per frame (empty: none)", simClockTrace);
     cmd.AddValue("rlfDetection",
                  "Detect radio link failures; ns-3's UE then stays detached, where a real modem "
                  "would reattach, so it is off by default and a lost link comes back with the signal",
@@ -332,6 +363,16 @@ main(int argc, char* argv[])
             // Needs the SynchronizerType attribute of NEWSLabNTU/ns-3-dev-git,
             // branch seps-sim-clock.
             Config::SetDefault("ns3::SimClockSynchronizer::Port", UintegerValue(simClockPort));
+            if (!lockstep.empty())
+            {
+                Config::SetDefault("ns3::SimClockSynchronizer::Gate", StringValue(lockstep));
+                if (simClockRate <= 0)
+                {
+                    simClockRate = 1.0;
+                }
+            }
+            Config::SetDefault("ns3::SimClockSynchronizer::Rate", DoubleValue(simClockRate));
+            Config::SetDefault("ns3::SimClockSynchronizer::TraceFile", StringValue(simClockTrace));
             Config::SetDefault("ns3::RealtimeSimulatorImpl::SynchronizerType",
                                TypeIdValue(SimClockSynchronizer::GetTypeId()));
         }
@@ -386,6 +427,7 @@ main(int argc, char* argv[])
     Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
     bool external = condition == "External";
     NS_ABORT_MSG_IF(external && !simClock, "--condition=External needs --simClock");
+    NS_ABORT_MSG_IF(!lockstep.empty() && !simClock, "--lockstep needs --simClock");
     channelHelper->ConfigureFactories(scenario, external ? "Default" : condition, "ThreeGpp");
     if (external)
     {
@@ -564,6 +606,10 @@ main(int argc, char* argv[])
                                           << ", clock " << (simClock ? "external" : "wall")
                                           << ", reattach model "
                                           << (reattachTime > 0 ? "on" : "off") << std::endl;
+    if (stallEvery > 0)
+    {
+        Simulator::Schedule(Seconds(stallEvery), &Stall, Seconds(stallEvery), stallMs);
+    }
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     Simulator::Destroy();

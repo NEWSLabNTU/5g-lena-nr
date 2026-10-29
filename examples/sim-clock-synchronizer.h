@@ -5,13 +5,17 @@
 #ifndef SIM_CLOCK_SYNCHRONIZER_H
 #define SIM_CLOCK_SYNCHRONIZER_H
 
+#include "ns3/nstime.h"
 #include "ns3/synchronizer.h"
 #include "ns3/vector.h"
 
 #include <chrono>
 #include <condition_variable>
+#include <fstream>
 #include <cstdint>
 #include <mutex>
+#include <netinet/in.h>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -40,6 +44,17 @@ namespace ns3
  * taken as a restart of the external clock (a world that ran unwatched, or a
  * new episode whose clock starts again from zero) and absorbed as one step.
  * Before the first tick ns-3 waits.
+ *
+ * Lockstep (Gate set to the external simulator's tick gate, host:port): the
+ * world then waits for ns-3 as well. A tick may end with the external frame
+ * number (a little-endian uint64 after the condition bytes). ns-3 owns the
+ * interval from that tick's time to one step later; once every event before
+ * the interval's end has run and the clock has reached it, it sends
+ * `DONE <frame>` to the gate, which holds the next tick until then. The
+ * clock never leads the event being executed by more than Slack: an event
+ * that takes long, or a backlog of events, pauses the clock instead of
+ * making later events late. Rate fixes the pace within the interval
+ * (external ns per wall ns); 0 keeps the measured rate.
  */
 class SimClockSynchronizer : public Synchronizer
 {
@@ -90,8 +105,21 @@ class SimClockSynchronizer : public Synchronizer
     void Listen();
     /// The external clock relative to the origin, in ns; caller holds m_mutex.
     uint64_t NowLocked();
+    /// The pace within an interval: Rate, or the measured rate.
+    double PaceLocked() const;
+    /// Send one datagram of the tick-gate protocol, if a gate is set.
+    void SendGate(const std::string& msg);
+    /// The clock at the current interval's end; caller holds m_mutex.
+    uint64_t IntervalEndLocked() const;
+    /// Statistics line, every so many acknowledged frames; caller holds m_mutex.
+    void ReportLocked();
 
     uint16_t m_port;
+    std::string m_gate;       ///< tick gate host:port, empty for none
+    double m_fixedRate;       ///< external ns per wall ns, 0 for measured
+    Time m_slackTime;         ///< how far the clock may lead the executing event
+    Time m_stepTime;          ///< the step assumed before one is measured
+    std::string m_traceFile;  ///< per-frame CSV, empty for none
     int m_socket;
     std::thread m_thread;
     bool m_stop;
@@ -117,6 +145,31 @@ class SimClockSynchronizer : public Synchronizer
     uint64_t m_origin;        ///< clock value at the origin (ns)
     uint64_t m_last;          ///< last value returned, to stay monotonic
     uint64_t m_eventStart;
+
+    // Lockstep.
+    bool m_gateOn;
+    sockaddr_in m_gateAddr;
+    Clock::time_point m_tickWallRaw; ///< arrival of the last tick, for the rate
+    bool m_haveFrame;
+    uint64_t m_frame;           ///< external frame of the last tick
+    bool m_acked;               ///< the current interval was acknowledged
+    Clock::time_point m_ackWall;
+    bool m_idle;                ///< caught up and waiting for the next event
+    uint64_t m_simPos;          ///< simulation time (ns) of the executing event
+    // Statistics, reset at each report.
+    uint64_t m_acks;
+    double m_holdMs;            ///< wall time held at an interval's end
+    uint64_t m_holdSignals;     ///< external events scheduled while held
+    double m_pausedMs;          ///< wall time the clock was paused for ns-3
+    uint64_t m_maxLateNs;       ///< largest lag of an event behind the clock
+    uint64_t m_lateEvents;      ///< events more than 1 ms behind the clock
+    uint64_t m_events;
+    // Per-frame trace.
+    std::ofstream m_trace;
+    Clock::time_point m_wall0;
+    double m_framePausedMs;     ///< clock paused during the current frame
+    uint64_t m_frameMaxLateNs;  ///< largest lateness during the current frame
+    double m_tickArrivalMs;     ///< wall time of the current frame's tick
 };
 
 } // namespace ns3
