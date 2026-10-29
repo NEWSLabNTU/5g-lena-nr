@@ -35,6 +35,7 @@
 #include "edge-tunnel-app.h"
 #include "external-channel-condition-model.h"
 #include "sim-clock-synchronizer.h"
+#include "traced-channel-model.h"
 #include "ue-tunnel-app.h"
 
 #include "ns3/antenna-module.h"
@@ -92,94 +93,52 @@ ApplyPositions(Ptr<SimClockSynchronizer> clock, NodeContainer ues, Time period, 
     Simulator::Schedule(period, &ApplyPositions, clock, ues, period, tick);
 }
 
-/// Each UE's radio between two trace rows, and its state in the reattach model.
+/// Each UE's radio between two trace rows, and its RRC service state.
 struct UeRadio
 {
     double ctrlSinrSum = 0;   ///< linear, over the DL control SINR reports
     uint32_t ctrlSinrN = 0;
     double lossSum = 0;       ///< dB, DL control coupling loss (path loss less gains)
     uint32_t lossN = 0;
-    double lastLoss = NAN;    ///< dB, the latest coupling loss
-    Time belowSince = Time::Max(); ///< since when the link quality is below Qout
-    Time goodSince = Time::Max();  ///< out of service: since when it is back above Qout
-    bool outOfService = false;
-    uint32_t failures = 0;
+    bool inService = false;   ///< RRC connected (CONNECTED_NORMALLY)
+    uint32_t failures = 0;    ///< radio link failures declared
     Ptr<UeTunnelApp> tunnel;
 };
 
 std::vector<UeRadio> g_radio;
 std::map<uint32_t, uint32_t> g_ueByNode; ///< node id -> UE index
-double g_qoutDb = -8.0;
-Time g_t310 = Seconds(1);
-Time g_reattach = Seconds(0); ///< zero: the model is off
+std::map<uint64_t, uint32_t> g_ueByImsi; ///< IMSI -> UE index
 double g_ueTxPowerDbm = 23.0;
 double g_ulNoiseDbm = -174.0 + 10 * std::log10(360e3) + 5.0; ///< thermal over one RB, gNB NF 5 dB
 
-/// The uplink's SNR in one resource block, estimated from the DL coupling loss
-/// by reciprocity (UE power less loss less noise): what the UE has for a
-/// scheduling request or a small grant, with all its power in that block. The
-/// uplink is the weaker direction (23 dBm against the gNB's 30 dBm), and ns-3
-/// reports no uplink SINR when the UE sends nothing.
-double
-UlSnrEstimateDb(const UeRadio& r)
-{
-    return g_ueTxPowerDbm - r.lastLoss - g_ulNoiseDbm;
-}
-
-/// While out of service, every 10 ms: back in service once the link has been
-/// good again for the reattach time (cell found again, then RRC set-up).
-void
-Reattach(uint32_t k)
-{
-    UeRadio& r = g_radio[k];
-    if (r.goodSince == Time::Max() || Simulator::Now() - r.goodSince < g_reattach)
-    {
-        Simulator::Schedule(MilliSeconds(10), &Reattach, k);
-        return;
-    }
-    r.outOfService = false;
-    r.tunnel->SetOutOfService(false);
-}
-
-/// DL control SINR (linear), every slot: the trace, and radio link monitoring
-/// for the reattach model. A UE whose link quality, the weaker of the DL
-/// control SINR and the estimated UL SNR, stays below Qout for T310 declares a
-/// radio link failure and is out of service until the link has been good again
-/// for the reattach time (own simplification of TS 38.331's N310/T310, of
-/// uplink failure through scheduling requests and random access, and of RRC
-/// re-establishment).
+/// DL control SINR (linear), every slot, for the trace.
 void
 OnCtrlSinr(uint32_t k, uint16_t, uint16_t, double sinr, uint16_t)
 {
-    UeRadio& r = g_radio[k];
-    r.ctrlSinrSum += sinr;
-    ++r.ctrlSinrN;
-    Time now = Simulator::Now();
-    double quality = 10 * std::log10(sinr);
-    if (std::isfinite(r.lastLoss))
+    g_radio[k].ctrlSinrSum += sinr;
+    ++g_radio[k].ctrlSinrN;
+}
+
+/// The UE's RRC state: in service while connected. A radio link failure (TS
+/// 38.331: N310 out-of-sync indications, then T310 without N311 in-sync ones)
+/// takes it to idle, cell selection and a new RRC set-up with random access.
+void
+OnRrcState(std::string, uint64_t imsi, uint16_t, uint16_t, NrUeRrc::State, NrUeRrc::State to)
+{
+    auto it = g_ueByImsi.find(imsi);
+    if (it != g_ueByImsi.end())
     {
-        quality = std::min(quality, UlSnrEstimateDb(r));
+        g_radio[it->second].inService = to == NrUeRrc::CONNECTED_NORMALLY;
     }
-    if (quality >= g_qoutDb)
+}
+
+void
+OnRlf(std::string, uint64_t imsi, uint16_t, uint16_t)
+{
+    auto it = g_ueByImsi.find(imsi);
+    if (it != g_ueByImsi.end())
     {
-        r.belowSince = Time::Max();
-        if (r.outOfService && r.goodSince == Time::Max())
-        {
-            r.goodSince = now;
-        }
-        return;
-    }
-    r.goodSince = Time::Max();
-    if (r.belowSince == Time::Max())
-    {
-        r.belowSince = now;
-    }
-    if (g_reattach.IsStrictlyPositive() && !r.outOfService && now - r.belowSince >= g_t310)
-    {
-        r.outOfService = true;
-        ++r.failures;
-        r.tunnel->SetOutOfService(true);
-        Simulator::Schedule(MilliSeconds(10), &Reattach, k);
+        ++g_radio[it->second].failures;
     }
 }
 
@@ -191,15 +150,15 @@ OnCtrlLoss(uint16_t, uint8_t, uint32_t node, double lossDb)
     {
         g_radio[it->second].lossSum += lossDb;
         ++g_radio[it->second].lossN;
-        g_radio[it->second].lastLoss = lossDb;
     }
 }
 
 /// One row per UE every period of simulation time: ns-3's time, the world's
 /// (the last tick's, relative to the first), the UE's position and link
 /// condition, its distance to the gNB, mean DL control SINR and coupling loss
-/// over the period, the UL SNR that loss implies, its service state, failures
-/// and drops.
+/// over the period, the UL SNR that loss implies, whether it is RRC connected,
+/// its radio link failures so far and the tunnel's drops (0 since the own
+/// reattach model is gone).
 void
 TraceRadio(std::ofstream* out,
            Ptr<SimClockSynchronizer> clock,
@@ -218,7 +177,7 @@ TraceRadio(std::ofstream* out,
         double ulSnr = g_ueTxPowerDbm - loss - g_ulNoiseDbm;
         *out << Simulator::Now().GetSeconds() << "," << world << "," << k << "," << p.x << ","
              << p.y << "," << p.z << "," << cond << "," << CalculateDistance(p, gnb) << ","
-             << sinrDb << "," << loss << "," << ulSnr << "," << (r.outOfService ? 0 : 1) << "," << r.failures
+             << sinrDb << "," << loss << "," << ulSnr << "," << (r.inService ? 1 : 0) << "," << r.failures
              << "," << r.tunnel->GetOutOfServiceDrops() << "\n";
         r.ctrlSinrSum = 0;
         r.ctrlSinrN = 0;
@@ -285,15 +244,19 @@ main(int argc, char* argv[])
     std::string tapEdge = "tap_edge";
     bool realtime = true;
     bool simClock = false;
-    bool rlfDetection = false;
+    bool rlfDetection = true;
     uint16_t simClockPort = 5600;
     uint32_t rngRun = 1;
     std::string traceFile = "";
     double tracePeriod = 0.1;
-    double reattachTime = 0.0;
-    double qout = -8.0;
-    double t310 = 1.0;
+    double qout = -5.0;
+    uint32_t t310 = 1000;
+    uint32_t n310 = 1;
+    uint32_t n311 = 1;
     std::string lockstep = "";
+    std::string channel = "3gpp";
+    uint16_t tracedPort = 5601;
+    int32_t channelLag = 1;
     double simClockRate = 0.0;
     double stallEvery = 0.0;
     double stallMs = 200.0;
@@ -326,6 +289,15 @@ main(int argc, char* argv[])
                  "The external simulator's tick gate (host:port): it then holds each tick until "
                  "ns-3 has run the previous frame's interval (needs --simClock; phase 024)",
                  lockstep);
+    cmd.AddValue("channel",
+                 "3gpp (the TR 38.901 scenario's statistics, with --condition) or Traced (each "
+                 "UE's paths from the RT server, phase 026; needs --simClock)",
+                 channel);
+    cmd.AddValue("tracedPort", "UDP port of the RT server's paths", tracedPort);
+    cmd.AddValue("channelLag",
+                 "With --channel=Traced and --lockstep: a frame runs on the paths of the frame "
+                 "this many frames back, and waits for them",
+                 channelLag);
     cmd.AddValue("simClockRate",
                  "Pace within a frame, simulation s per wall s (0: measured; 1 by default with "
                  "--lockstep)",
@@ -337,19 +309,17 @@ main(int argc, char* argv[])
     cmd.AddValue("stallMs", "Test: the stall's wall time in ms", stallMs);
     cmd.AddValue("simClockTrace", "CSV of the external clock, one line per frame (empty: none)", simClockTrace);
     cmd.AddValue("rlfDetection",
-                 "Detect radio link failures; ns-3's UE then stays detached, where a real modem "
-                 "would reattach, so it is off by default and a lost link comes back with the signal",
+                 "Detect radio link failures and recover by TS 38.331's idle path (cell "
+                 "selection, random access, RRC set-up); off: a lost link comes back with the "
+                 "signal",
                  rlfDetection);
     cmd.AddValue("rngRun", "RNG run number", rngRun);
     cmd.AddValue("traceFile", "CSV of each UE's radio every tracePeriod of simulation time (empty: none)", traceFile);
     cmd.AddValue("tracePeriod", "Trace period in s of simulation time", tracePeriod);
-    cmd.AddValue("reattachTime",
-                 "Reattach model: a UE whose link quality (DL control SINR, estimated UL SNR in one "
-                 "RB) stays below qout for t310 is out of service until it has been above qout "
-                 "again for this many s (0: off)",
-                 reattachTime);
-    cmd.AddValue("qout", "Reattach model: out-of-sync threshold on the DL control SINR in dB", qout);
-    cmd.AddValue("t310", "Reattach model: time below qout before a radio link failure, in s", t310);
+    cmd.AddValue("qout", "Out-of-sync threshold on the DL control SINR, dB (NrUePhy::Qout)", qout);
+    cmd.AddValue("t310", "T310, ms (TS 38.331; 1000 [UNVERIFIED as an operator value])", t310);
+    cmd.AddValue("n310", "N310 (TS 38.331; 1, as reported of Ericsson and Nokia networks [UNVERIFIED])", n310);
+    cmd.AddValue("n311", "N311 (TS 38.331; 1 [UNVERIFIED])", n311);
     cmd.Parse(argc, argv);
 
     // The simulator implementation must be chosen before any ns-3 object exists.
@@ -372,6 +342,10 @@ main(int argc, char* argv[])
                 }
             }
             Config::SetDefault("ns3::SimClockSynchronizer::Rate", DoubleValue(simClockRate));
+            if (channel == "Traced" && !lockstep.empty())
+            {
+                Config::SetDefault("ns3::SimClockSynchronizer::ChannelLag", IntegerValue(channelLag));
+            }
             Config::SetDefault("ns3::SimClockSynchronizer::TraceFile", StringValue(simClockTrace));
             Config::SetDefault("ns3::RealtimeSimulatorImpl::SynchronizerType",
                                TypeIdValue(SimClockSynchronizer::GetTypeId()));
@@ -434,7 +408,30 @@ main(int argc, char* argv[])
         channelHelper->ConfigureChannelConditionFactory(ExternalChannelConditionModel::GetTypeId());
     }
     channelHelper->SetPathlossAttribute("ShadowingEnabled", BooleanValue(false));
-    channelHelper->AssignChannelsToBands({band});
+    bool traced = channel == "Traced";
+    NS_ABORT_MSG_IF(traced && !simClock, "--channel=Traced needs --simClock");
+    // Traced: fading only, no propagation loss model (the paths' gains are absolute),
+    // and the spectrum model's channel is the traced one.
+    channelHelper->AssignChannelsToBands({band},
+                                         traced ? NrChannelHelper::INIT_FADING
+                                                : NrChannelHelper::INIT_PROPAGATION |
+                                                      NrChannelHelper::INIT_FADING);
+    Ptr<TracedChannelModel> tracedModel;
+    if (traced)
+    {
+        tracedModel = CreateObject<TracedChannelModel>();
+        tracedModel->SetAttribute("Port", UintegerValue(tracedPort));
+        tracedModel->SetAttribute("Frequency", DoubleValue(centralFrequency));
+        for (auto& cc : band.m_cc)
+        {
+            for (auto& bwp : cc->m_bwp)
+            {
+                auto spectrum = bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel();
+                NS_ABORT_MSG_IF(!spectrum, "no phased-array spectrum model to trace into");
+                spectrum->SetAttribute("ChannelModel", PointerValue(tracedModel));
+            }
+        }
+    }
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
     nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(4));
@@ -450,6 +447,10 @@ main(int argc, char* argv[])
     nrHelper->SetUePhyAttribute("TxPower", DoubleValue(ueTxPower));
 
     Config::SetDefault("ns3::NrUePhy::EnableRlfDetection", BooleanValue(rlfDetection));
+    Config::SetDefault("ns3::NrUePhy::Qout", DoubleValue(qout));
+    Config::SetDefault("ns3::NrUeRrc::T310", TimeValue(MilliSeconds(t310)));
+    Config::SetDefault("ns3::NrUeRrc::N310", UintegerValue(n310));
+    Config::SetDefault("ns3::NrUeRrc::N311", UintegerValue(n311));
 
     // Unacknowledged RLC: a lost transport block is lost, not delayed.
     Config::SetDefault("ns3::NrGnbRrc::EpsBearerToRlcMapping", EnumValue(NrGnbRrc::RLC_UM_ALWAYS));
@@ -457,9 +458,6 @@ main(int argc, char* argv[])
 
     NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
     NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
-    g_qoutDb = qout;
-    g_t310 = Seconds(t310);
-    g_reattach = Seconds(reattachTime);
     g_ueTxPowerDbm = ueTxPower;
     g_ulNoiseDbm = -174.0 + 10 * std::log10(12 * 15e3 * (1 << numerology)) + 5.0; // one RB
     g_radio.resize(numUes);
@@ -573,6 +571,23 @@ main(int argc, char* argv[])
     std::cout << "edge: " << tapEdge << ", RSU subnet 10.1.1.0/24, edge server " << edgeIp << std::endl;
 
     nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
+    if (tracedModel)
+    {
+        std::vector<uint32_t> ueNodeIds;
+        for (uint32_t k = 0; k < numUes; ++k)
+        {
+            ueNodeIds.push_back(ueNodes.Get(k)->GetId());
+        }
+        tracedModel->SetNodes(gnbNodes.Get(0)->GetId(), ueNodeIds);
+    }
+    for (uint32_t k = 0; k < numUes; ++k)
+    {
+        g_ueByImsi[DynamicCast<NrUeNetDevice>(ueDevs.Get(k))->GetImsi()] = k;
+    }
+    Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/NrUeRrc/StateTransition",
+                    MakeCallback(&OnRrcState));
+    Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/NrUeRrc/RadioLinkFailure",
+                    MakeCallback(&OnRlf));
 
     Ptr<SimClockSynchronizer> clock;
     if (simClock)
@@ -604,8 +619,10 @@ main(int argc, char* argv[])
                                           << ", " << centralFrequency / 1e9 << " GHz, "
                                           << bandwidth / 1e6 << " MHz, realtime " << realtime
                                           << ", clock " << (simClock ? "external" : "wall")
-                                          << ", reattach model "
-                                          << (reattachTime > 0 ? "on" : "off") << std::endl;
+                                          << ", channel " << channel << ", radio link failure "
+                                          << (rlfDetection ? "on" : "off") << " (T310 " << t310
+                                          << " ms, N310 " << n310 << ", N311 " << n311 << ")"
+                                          << std::endl;
     if (stallEvery > 0)
     {
         Simulator::Schedule(Seconds(stallEvery), &Stall, Seconds(stallEvery), stallMs);

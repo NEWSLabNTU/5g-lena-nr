@@ -4,7 +4,10 @@
 
 #include "sim-clock-synchronizer.h"
 
+#include "traced-channel-model.h"
+
 #include "ns3/double.h"
+#include "ns3/integer.h"
 #include "ns3/log.h"
 #include "ns3/nstime.h"
 #include "ns3/simulator.h"
@@ -58,6 +61,13 @@ SimClockSynchronizer::GetTypeId()
                           TimeValue(MilliSeconds(5)),
                           MakeTimeAccessor(&SimClockSynchronizer::m_slackTime),
                           MakeTimeChecker())
+            .AddAttribute("ChannelLag",
+                          "With a traced channel (phase 026): the clock holds at a frame's "
+                          "start until the paths of the frame this many frames back have "
+                          "arrived (g_tracedChannelFrame); -1 for no traced channel",
+                          IntegerValue(-1),
+                          MakeIntegerAccessor(&SimClockSynchronizer::m_channelLag),
+                          MakeIntegerChecker<int32_t>(-1))
             .AddAttribute("TraceFile",
                           "CSV with one line per external tick: frame, simulation time, wall "
                           "time of the tick, and of the previous frame's acknowledgement, the "
@@ -78,6 +88,7 @@ SimClockSynchronizer::SimClockSynchronizer()
       m_fixedRate(0.0),
       m_slackTime(MilliSeconds(5)),
       m_stepTime(MilliSeconds(50)),
+      m_channelLag(-1),
       m_socket(-1),
       m_stop(false),
       m_condition(false),
@@ -394,6 +405,13 @@ SimClockSynchronizer::NowLocked()
     }
     double pace = PaceLocked();
     auto wallNow = Clock::now();
+    // A traced channel: until the paths of frame k - L are in, the frame's
+    // interval has not started (its start moves on with the wall clock).
+    if (m_channelLag >= 0 && m_haveFrame &&
+        g_tracedChannelFrame.load() < static_cast<int64_t>(m_frame) - m_channelLag)
+    {
+        m_tickWall = wallNow;
+    }
     double since = std::chrono::duration<double, std::nano>(wallNow - m_tickWall).count();
     uint64_t lead = static_cast<uint64_t>(std::max(0.0, since * pace));
     if (m_step > 0)
@@ -540,7 +558,8 @@ SimClockSynchronizer::DoSynchronize(uint64_t nsCurrent, uint64_t nsDelay)
         }
         // Sleep until the interpolated clock should reach the target, or until a
         // tick or a signal arrives, whichever is first; re-check either way.
-        auto wait = std::chrono::milliseconds(50);
+        // Waiting for a traced channel, look again soon.
+        auto wait = std::chrono::milliseconds(m_channelLag >= 0 ? 2 : 50);
         if (m_haveTick && !m_originPending && m_step > 0 && PaceLocked() > 0)
         {
             double ns = (target - now) / PaceLocked();

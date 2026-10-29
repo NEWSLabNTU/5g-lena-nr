@@ -1056,6 +1056,13 @@ class NrUePhy : public NrPhy
 
     bool m_isConnected;
     void DoNotifyConnectionSuccessful();
+
+  public:
+    /// The MAC's notice of an RRC connection reaches the UE PHY here (the base
+    /// class's is empty): radio link monitoring starts.
+    void NotifyConnectionSuccessful() override;
+
+  private:
     /**
      * The 'Qin' attribute.
      * corresponds to 2% block error rate of a hypothetical PDCCH transmission
@@ -1081,8 +1088,11 @@ class NrUePhy : public NrPhy
     uint16_t m_numOfFrames; ///< count the number of frames for which the downlink radio link
     ///< quality is estimated
     double m_sinrDbFrame;           ///< the average SINR per radio frame
-    SpectrumValue m_ctrlSinrForRlf; ///< the CTRL SINR used for RLF detection
+    double m_rlfSinrSum{0};         ///< DL CTRL SINR (linear) received this radio frame, summed
+    uint32_t m_rlfSinrN{0};         ///< DL CTRL receptions this radio frame
     bool m_enableRlfDetection;      ///< Flag to enable/disable RLF detection
+    /// Every radio frame (10 ms): the frame's DL CTRL SINR to the RLF detector.
+    void RlfFrame();
     uint8_t m_csiFeedbackType;      ///< CSI feedback type configured by NrHelper
 };
 

@@ -46,6 +46,7 @@ NrUePhy::NrUePhy()
     m_powerControl = CreateObject<NrUePowerControl>(this);
     m_isConnected = false;
     Simulator::Schedule(m_ueMeasurementsFilterPeriod, &NrUePhy::ReportUeMeasurements, this);
+    Simulator::Schedule(MilliSeconds(10), &NrUePhy::RlfFrame, this);
 }
 
 NrUePhy::~NrUePhy()
@@ -209,6 +210,31 @@ NrUePhy::GetTypeId()
                             "Report UE measurements RSRP (dBm) and RSRQ (dB).",
                             MakeTraceSourceAccessor(&NrUePhy::m_reportUeMeasurements),
                             "ns3::NrUePhy::RsrpRsrqTracedCallback")
+            .AddAttribute("Qout",
+                          "SINR threshold (dB) below which a radio frame counts as not "
+                          "decodable for out-of-sync detection (hypothetical PDCCH at 10% BLER; "
+                          "the LTE model's default)",
+                          DoubleValue(-5.0),
+                          MakeDoubleAccessor(&NrUePhy::m_qOut),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("Qin",
+                          "SINR threshold (dB) above which a radio frame counts as decodable for "
+                          "in-sync detection (hypothetical PDCCH at 2% BLER; the LTE model's "
+                          "default)",
+                          DoubleValue(-3.9),
+                          MakeDoubleAccessor(&NrUePhy::m_qIn),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("NumQoutEvalSf",
+                          "Out-of-sync evaluation period, subframes (ms): consecutive "
+                          "undecodable frames over it give one out-of-sync indication",
+                          UintegerValue(200),
+                          MakeUintegerAccessor(&NrUePhy::m_numOfQoutEvalSf),
+                          MakeUintegerChecker<uint16_t>(10))
+            .AddAttribute("NumQinEvalSf",
+                          "In-sync evaluation period, subframes (ms)",
+                          UintegerValue(100),
+                          MakeUintegerAccessor(&NrUePhy::m_numOfQinEvalSf),
+                          MakeUintegerChecker<uint16_t>(10))
             .AddAttribute("EnableRlfDetection",
                           "If true, RLF detection will be enabled.",
                           BooleanValue(true),
@@ -1502,14 +1528,6 @@ NrUePhy::ReportUeMeasurements()
 
         m_reportRsrpTrace(GetCellId(), m_imsi, m_rnti, avg_rsrp, GetBwpId());
 
-        // trigger RLF detection only when UE has an active RRC connection
-        // and RLF detection attribute is set to true
-        if (m_isConnected && m_enableRlfDetection)
-        {
-            double avrgSinrForRlf = ComputeAvgSinr(m_ctrlSinrForRlf);
-            RlfDetection(10 * log10(avrgSinrForRlf));
-        }
-
         NrUeCphySapUser::UeMeasurementsElement newEl;
         newEl.m_cellId = (*it).first;
         newEl.m_rsrp = avg_rsrp;
@@ -1557,6 +1575,29 @@ NrUePhy::ReportDlCtrlSinr(const SpectrumValue& sinr)
 
     NS_ASSERT(rbUsed);
     m_dlCtrlSinrTrace(GetCellId(), m_rnti, sinrSum / rbUsed, GetBwpId());
+    m_rlfSinrSum += sinrSum / rbUsed;
+    m_rlfSinrN++;
+}
+
+void
+NrUePhy::RlfFrame()
+{
+    // Radio link monitoring once per radio frame, while connected: the frame's
+    // DL CTRL SINR, averaged over what was received in it. The gNB sends the MIB
+    // in every frame, so a frame with no DL CTRL at all means the cell was lost
+    // and counts as undecodable. The detector counts subframes, ten per frame.
+    if (m_isConnected && m_enableRlfDetection)
+    {
+        double sinr = m_rlfSinrN > 0 ? m_rlfSinrSum / m_rlfSinrN : 1e-10;
+        double sinrDb = 10 * std::log10(std::max(sinr, 1e-10));
+        for (int sf = 0; sf < 10; ++sf)
+        {
+            RlfDetection(sinrDb);
+        }
+    }
+    m_rlfSinrSum = 0;
+    m_rlfSinrN = 0;
+    Simulator::Schedule(MilliSeconds(10), &NrUePhy::RlfFrame, this);
 }
 
 uint8_t
@@ -1704,6 +1745,12 @@ void
 NrUePhy::SetPhySapUser(NrUePhySapUser* ptr)
 {
     m_phySapUser = ptr;
+}
+
+void
+NrUePhy::NotifyConnectionSuccessful()
+{
+    DoNotifyConnectionSuccessful();
 }
 
 void

@@ -122,9 +122,9 @@ class NrPhy : public Object
 
     /**
      * @brief Notify PHY about the successful RRC connection
-     * establishment.
+     * establishment. Virtual: the UE PHY starts radio link monitoring there.
      */
-    void NotifyConnectionSuccessful();
+    virtual void NotifyConnectionSuccessful();
 
     /**
      * @brief Configures TB decode latency

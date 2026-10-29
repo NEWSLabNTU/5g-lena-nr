@@ -120,6 +120,7 @@ class SimClockSynchronizer : public Synchronizer
     Time m_slackTime;         ///< how far the clock may lead the executing event
     Time m_stepTime;          ///< the step assumed before one is measured
     std::string m_traceFile;  ///< per-frame CSV, empty for none
+    int32_t m_channelLag;     ///< hold each frame until this many frames back are traced (-1 off)
     int m_socket;
     std::thread m_thread;
     bool m_stop;

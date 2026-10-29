@@ -469,6 +469,14 @@ class NrUeMac : public Object
 
     SrBsrMachine m_srState{INACTIVE}; //!< Current state for the SR/BSR machine.
 
+    // TS 38.321 5.4.4: a pending SR is sent again while no UL grant comes.
+    Time m_srProhibit{MilliSeconds(8)}; //!< sr-ProhibitTimer
+    uint32_t m_srTransMax{64};          //!< sr-TransMax
+    uint32_t m_srCounter{0};            //!< SR_COUNTER
+    Time m_srSentAt;                    //!< when the last SR was sent
+    Time m_lastUlGrant;                 //!< when the last UL DCI arrived
+    TracedCallback<uint16_t, uint32_t> m_srTransMaxTrace; //!< RNTI, SRs sent without a grant
+
     Ptr<UniformRandomVariable> m_raPreambleUniformVariable;
     uint8_t m_raPreambleId{0}; //!< The RA Preamble ID
     uint8_t m_raRnti{0};       //!< The RA Rnti

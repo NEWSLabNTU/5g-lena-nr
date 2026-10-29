@@ -214,6 +214,24 @@ NrUeMac::GetTypeId()
                 UintegerValue(16),
                 MakeUintegerAccessor(&NrUeMac::SetNumHarqProcess, &NrUeMac::GetNumHarqProcess),
                 MakeUintegerChecker<uint8_t>())
+            .AddAttribute("SrProhibitTimer",
+                          "TS 38.321's sr-ProhibitTimer: while data waits and no UL grant has "
+                          "come for this long since the last SR or grant, the SR is sent again "
+                          "(0: never, the model's earlier behaviour)",
+                          TimeValue(MilliSeconds(8)),
+                          MakeTimeAccessor(&NrUeMac::m_srProhibit),
+                          MakeTimeChecker())
+            .AddAttribute("SrTransMax",
+                          "TS 38.321's sr-TransMax: SRs sent without a grant before the "
+                          "SrTransMaxReached trace fires (where a UE would start random access; "
+                          "here it keeps requesting)",
+                          UintegerValue(64),
+                          MakeUintegerAccessor(&NrUeMac::m_srTransMax),
+                          MakeUintegerChecker<uint32_t>(1))
+            .AddTraceSource("SrTransMaxReached",
+                            "sr-TransMax SRs went out without an UL grant: RNTI, SRs sent",
+                            MakeTraceSourceAccessor(&NrUeMac::m_srTransMaxTrace),
+                            "ns3::TracedCallback::Uint16Uint32")
             .AddTraceSource("UeMacRxedCtrlMsgsTrace",
                             "Ue MAC Control Messages Traces.",
                             MakeTraceSourceAccessor(&NrUeMac::m_macRxedCtrlMsgsTrace),
@@ -606,10 +624,25 @@ NrUeMac::DoSlotIndication(const SfnSf& sfn)
 
     RefreshHarqProcessesPacketBuffer();
 
+    // TS 38.321 5.4.4: an SR that brought no UL grant within sr-ProhibitTimer is
+    // sent again, as long as data waits. Without this, an SR (or the BSR after
+    // it) lost in an outage left the UE waiting for a grant forever.
+    if (m_srState == ACTIVE && m_srProhibit.IsStrictlyPositive() && m_rnti != 0 &&
+        GetTotalBufSize() > 0 && Simulator::Now() - std::max(m_srSentAt, m_lastUlGrant) >= m_srProhibit)
+    {
+        if (++m_srCounter >= m_srTransMax)
+        {
+            m_srTransMaxTrace(m_rnti, m_srCounter);
+            m_srCounter = 0;
+        }
+        m_srState = TO_SEND;
+    }
+
     if (m_srState == TO_SEND)
     {
         NS_LOG_INFO("Sending SR to PHY in slot " << sfn);
         SendSR();
+        m_srSentAt = Simulator::Now();
         m_srState = ACTIVE;
         NS_LOG_INFO("m_srState = TO_SEND -> ACTIVE");
         m_macUeStateMachine(m_currentSlot,
@@ -730,6 +763,8 @@ NrUeMac::RecvRaResponse(NrBuildRarListElement_s raResponse)
 void
 NrUeMac::ProcessUlDci(const Ptr<NrUlDciMessage>& dciMsg)
 {
+    m_lastUlGrant = Simulator::Now();
+    m_srCounter = 0;
     NS_LOG_FUNCTION(this);
 
     SfnSf dataSfn = m_currentSlot;

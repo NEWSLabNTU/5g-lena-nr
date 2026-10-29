@@ -214,7 +214,23 @@ build_lib_example(
                ue-tunnel-app.cc
                edge-tunnel-app.cc
                sim-clock-synchronizer.cc
+               traced-channel-model.cc
                external-channel-condition-model.cc
   LIBRARIES_TO_LINK ${libnr}
                     ${libtap-bridge}
+)
+
+build_lib_example(
+  NAME nr-rlf-recovery
+  SOURCE_FILES nr-rlf-recovery.cc
+  LIBRARIES_TO_LINK ${libnr}
+                    ${libapplications}
+)
+
+build_lib_example(
+  NAME nr-traced-channel-test
+  SOURCE_FILES nr-traced-channel-test.cc
+               traced-channel-model.cc
+  LIBRARIES_TO_LINK ${libnr}
+                    ${libapplications}
 )

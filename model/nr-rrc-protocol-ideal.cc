@@ -154,7 +154,16 @@ NrUeRrcProtocolIdeal::DoSendMeasurementReport(NrRrcSap::MeasurementReport msg)
 void
 NrUeRrcProtocolIdeal::DoSendIdealUeContextRemoveRequest(uint16_t rnti)
 {
-    NS_FATAL_ERROR("NrUeRrcProtocolIdeal does not have RLF functionality yet");
+    NS_LOG_FUNCTION(this << rnti);
+    // After a radio link failure the UE asks the gNB it was attached to to drop
+    // its context, as LTE's ideal protocol does (LteUeRrcProtocolIdeal).
+    m_rnti = m_rrc->GetRnti();
+    NS_ABORT_MSG_IF(m_rnti != rnti, "RNTI mismatch");
+    SetGnbRrcSapProvider(); // the cell may have changed since the last message
+    Simulator::Schedule(RRC_IDEAL_MSG_DELAY,
+                        &NrGnbRrcSapProvider::RecvIdealUeContextRemoveRequest,
+                        m_gnbRrcSapProvider,
+                        m_rnti);
 }
 
 void
