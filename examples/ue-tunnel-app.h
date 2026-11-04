@@ -97,6 +97,9 @@ class UeTunnelApp : public Application
      */
     uint64_t GetOutOfServiceDrops() const;
 
+    /// Tunnel datagrams received from the edge (downlink), in all
+    uint64_t GetRxPackets() const;
+
     /**
      * @brief Set handover window for blackout model
      *

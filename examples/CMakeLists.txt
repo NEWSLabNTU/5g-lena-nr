@@ -218,6 +218,7 @@ build_lib_example(
                external-channel-condition-model.cc
   LIBRARIES_TO_LINK ${libnr}
                     ${libtap-bridge}
+                    ${libapplications}
 )
 
 build_lib_example(

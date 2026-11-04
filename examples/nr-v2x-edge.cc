@@ -39,6 +39,7 @@
 #include "ue-tunnel-app.h"
 
 #include "ns3/antenna-module.h"
+#include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/csma-module.h"
 #include "ns3/internet-module.h"
@@ -105,6 +106,12 @@ struct UeRadio
     uint16_t cell = 0;        ///< serving cell id (a sector)
     uint32_t handovers = 0;   ///< handovers completed
     Ptr<UeTunnelApp> tunnel;
+    /// Downlink datagrams to the UE's NR address over the period, by hop: into
+    /// the PGW from the internet side, out of a gNB's S1-U towards the radio,
+    /// and received by the UE's tunnel app.
+    uint64_t dlPgw = 0;
+    uint64_t dlGnb = 0;
+    uint64_t ueTunnelRx = 0; ///< the tunnel app's count at the last row
     /// The data channels' transport blocks over the period (RxPacketTrace at the
     /// gNB for the uplink, at the UE for the downlink): count, corrupt, re-sent
     /// (redundancy version above 0), SINR (linear) and MCS sums.
@@ -119,6 +126,24 @@ struct UeRadio
 };
 
 std::vector<UeRadio> g_radio;
+std::map<uint32_t, uint32_t> g_ueByAddr; ///< UE NR address -> UE index
+
+/// A downlink datagram at a hop (PGW from the internet, gNB from S1-U), by its
+/// destination: count it for the UE it is addressed to.
+void
+OnDlHop(bool atGnb, Ptr<Packet> p)
+{
+    Ipv4Header ip;
+    if (p->PeekHeader(ip) == 0)
+    {
+        return;
+    }
+    auto it = g_ueByAddr.find(ip.GetDestination().Get());
+    if (it != g_ueByAddr.end())
+    {
+        ++(atGnb ? g_radio[it->second].dlGnb : g_radio[it->second].dlPgw);
+    }
+}
 std::map<uint32_t, uint32_t> g_ueByNode; ///< node id -> UE index
 std::map<uint64_t, uint32_t> g_ueByImsi; ///< IMSI -> UE index
 std::map<uint32_t, uint32_t> g_ueByRnti; ///< (cell id << 16 | RNTI) -> UE index
@@ -251,7 +276,11 @@ TraceRadio(std::ofstream* out,
             }
             *tb = UeRadio::Tb();
         }
-        *out << "," << r.cell << "," << r.handovers << "\n";
+        uint64_t ueRx = r.tunnel->GetRxPackets();
+        *out << "," << r.cell << "," << r.handovers << "," << r.dlPgw << "," << r.dlGnb << ","
+             << ueRx - r.ueTunnelRx << "\n";
+        r.dlPgw = r.dlGnb = 0;
+        r.ueTunnelRx = ueRx;
         r.ctrlSinrSum = 0;
         r.ctrlSinrN = 0;
         r.lossSum = 0;
@@ -317,6 +346,8 @@ main(int argc, char* argv[])
     std::string tapEdge = "tap_edge";
     bool realtime = true;
     bool simClock = false;
+    bool selfTest = false;
+    std::string hoPlan;
     bool rlfDetection = true;
     uint16_t simClockPort = 5600;
     uint32_t rngRun = 1;
@@ -382,6 +413,13 @@ main(int argc, char* argv[])
     cmd.AddValue("tapUePrefix", "TAP device name prefix for the UEs", tapUePrefix);
     cmd.AddValue("tapEdge", "TAP device name for the edge host", tapEdge);
     cmd.AddValue("realtime", "Run in real time (needed with TAPs)", realtime);
+    cmd.AddValue("selfTest",
+                 "No TAPs: the vehicles' and the RSU's ghost nodes get IP stacks and exchange UDP "
+                 "through the tunnels (tests; use with --realtime=0)",
+                 selfTest);
+    cmd.AddValue("hoPlan",
+                 "With --sectors > 1: manual handovers instead of A3, t_s,ue,source,target;... (tests)",
+                 hoPlan);
     cmd.AddValue("simClock", "Follow the external simulator's clock (ticks over UDP) instead of the wall clock", simClock);
     cmd.AddValue("simClockPort", "UDP port of the external clock's ticks", simClockPort);
     cmd.AddValue("lockstep",
@@ -576,7 +614,11 @@ main(int argc, char* argv[])
     Config::SetDefault("ns3::NrGnbRrc::EpsBearerToRlcMapping", EnumValue(NrGnbRrc::RLC_UM_ALWAYS));
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(1024 * 1024));
 
-    if (sectors > 1)
+    if (sectors > 1 && !hoPlan.empty())
+    {
+        nrHelper->SetHandoverAlgorithmType("ns3::NrNoOpHandoverAlgorithm");
+    }
+    else if (sectors > 1)
     {
         nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
         nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(hoHysteresis));
@@ -654,7 +696,18 @@ main(int argc, char* argv[])
     TapBridgeHelper tap;
     tap.SetAttribute("Mode", StringValue("UseBridge"));
     tap.SetAttribute("DeviceName", StringValue(tapEdge));
-    tap.Install(edgeGhost, edgeLan.Get(1));
+    if (selfTest)
+    {
+        internet.Install(edgeGhost);
+        ip.Assign(edgeLan.Get(1)); // 10.1.1.2
+        routing.GetStaticRouting(edgeGhost->GetObject<Ipv4>())
+            ->SetDefaultRoute(Ipv4Address("10.1.1.1"), 1);
+    }
+    else
+    {
+        tap.Install(edgeGhost, edgeLan.Get(1));
+    }
+    std::vector<Ptr<Node>> ghosts;
 
     Ptr<EdgeTunnelApp> edgeTunnel = CreateObject<EdgeTunnelApp>();
     edgeTunnel->SetOuterDevice(pgwEdge.Get(1));
@@ -685,8 +738,21 @@ main(int argc, char* argv[])
 
         std::ostringstream tapName;
         tapName << tapUePrefix << k;
-        tap.SetAttribute("DeviceName", StringValue(tapName.str()));
-        tap.Install(ghost, lan.Get(1));
+        if (selfTest)
+        {
+            internet.Install(ghost);
+            ip.Assign(lan.Get(1)); // 7.0.(k+1).2
+            std::ostringstream gw;
+            gw << "7.0." << (k + 1) << ".1";
+            routing.GetStaticRouting(ghost->GetObject<Ipv4>())
+                ->SetDefaultRoute(Ipv4Address(gw.str().c_str()), 1);
+            ghosts.push_back(ghost);
+        }
+        else
+        {
+            tap.SetAttribute("DeviceName", StringValue(tapName.str()));
+            tap.Install(ghost, lan.Get(1));
+        }
 
         Ptr<UeTunnelApp> ueTunnel = CreateObject<UeTunnelApp>();
         ueTunnel->SetInnerDevice(lan.Get(0));
@@ -777,7 +843,32 @@ main(int argc, char* argv[])
         NS_ABORT_MSG_IF(!trace, "cannot write " << traceFile);
         trace << "t_ns3,t_world,ue,x,y,z,condition,distance_m,ctrl_sinr_db,coupling_loss_db,"
                  "ul_snr_rb_db,in_service,failures,oos_drops,ul_sinr_db,ul_bler,ul_retx,ul_mcs,ul_tbs,"
-                 "dl_sinr_db,dl_bler,dl_retx,dl_mcs,dl_tbs,cell,handovers\n";
+                 "dl_sinr_db,dl_bler,dl_retx,dl_mcs,dl_tbs,cell,handovers,dl_pgw,dl_gnb,dl_ue\n";
+        for (uint32_t k = 0; k < numUes; ++k)
+        {
+            g_ueByAddr[ueIps.GetAddress(k).Get()] = k;
+        }
+        Ptr<Node> pgwNode = epcHelper->GetPgwNode();
+        for (uint32_t a = 0; a < pgwNode->GetNApplications(); ++a)
+        {
+            if (DynamicCast<NrEpcPgwApplication>(pgwNode->GetApplication(a)))
+            {
+                pgwNode->GetApplication(a)->TraceConnectWithoutContext(
+                    "RxFromTun", MakeBoundCallback(&OnDlHop, false));
+            }
+        }
+        for (uint32_t s = 0; s < sectors; ++s)
+        {
+            Ptr<Node> g = gnbNodes.Get(s);
+            for (uint32_t a = 0; a < g->GetNApplications(); ++a)
+            {
+                if (DynamicCast<NrEpcGnbApplication>(g->GetApplication(a)))
+                {
+                    g->GetApplication(a)->TraceConnectWithoutContext(
+                        "RxFromS1u", MakeBoundCallback(&OnDlHop, true));
+                }
+            }
+        }
         Simulator::Schedule(Seconds(tracePeriod),
                             &TraceRadio,
                             &trace,
@@ -795,6 +886,70 @@ main(int argc, char* argv[])
                                           << (rlfDetection ? "on" : "off") << " (T310 " << t310
                                           << " ms, N310 " << n310 << ", N311 " << n311 << ")"
                                           << std::endl;
+    if (selfTest)
+    {
+        // The RSU (edge ghost) and each vehicle (ghost k) exchange a 200 B datagram
+        // every 10 ms both ways; per-vehicle delivery is printed every second.
+        static std::vector<uint64_t> dl(numUes, 0);
+        static std::vector<uint64_t> ul(numUes, 0);
+        for (uint32_t k = 0; k < numUes; ++k)
+        {
+            uint16_t dlPort = 6000 + k;
+            uint16_t ulPort = 7000 + k;
+            UdpServerHelper dlSink(dlPort);
+            UdpServerHelper ulSink(ulPort);
+            ApplicationContainer d = dlSink.Install(ghosts[k]);
+            ApplicationContainer u = ulSink.Install(edgeGhost);
+            d.Start(Seconds(1.0));
+            u.Start(Seconds(1.0));
+            d.Get(0)->TraceConnectWithoutContext(
+                "Rx", MakeBoundCallback(+[](uint64_t* c, Ptr<const Packet>) { ++*c; }, &dl[k]));
+            u.Get(0)->TraceConnectWithoutContext(
+                "Rx", MakeBoundCallback(+[](uint64_t* c, Ptr<const Packet>) { ++*c; }, &ul[k]));
+            std::ostringstream dst;
+            dst << "7.0." << (k + 1) << ".2";
+            UdpClientHelper toVehicle(Ipv4Address(dst.str().c_str()), dlPort);
+            UdpClientHelper toRsu(Ipv4Address("10.1.1.2"), ulPort);
+            for (UdpClientHelper* h : {&toVehicle, &toRsu})
+            {
+                h->SetAttribute("Interval", TimeValue(MilliSeconds(10)));
+                h->SetAttribute("MaxPackets", UintegerValue(100000000));
+                h->SetAttribute("PacketSize", UintegerValue(200));
+            }
+            toVehicle.Install(edgeGhost).Start(Seconds(1.5));
+            toRsu.Install(ghosts[k]).Start(Seconds(1.5));
+        }
+        struct Report
+        {
+            static void Run(uint32_t n)
+            {
+                std::cout << Simulator::Now().As(Time::S) << " self-test received (DL/UL per 1 s):";
+                for (uint32_t k = 0; k < n; ++k)
+                {
+                    std::cout << " UE" << k << " " << dl[k] << "/" << ul[k];
+                    dl[k] = ul[k] = 0;
+                }
+                std::cout << std::endl;
+                Simulator::Schedule(Seconds(1), &Report::Run, n);
+            }
+        };
+        Simulator::Schedule(Seconds(1), &Report::Run, numUes);
+    }
+    {
+        std::istringstream plan(hoPlan);
+        std::string item;
+        while (std::getline(plan, item, ';'))
+        {
+            double t;
+            uint32_t ue;
+            uint32_t src;
+            uint32_t dst;
+            char c;
+            std::istringstream is(item);
+            NS_ABORT_MSG_IF(!(is >> t >> c >> ue >> c >> src >> c >> dst), "bad --hoPlan item " << item);
+            nrHelper->HandoverRequest(Seconds(t), ueDevs.Get(ue), gnbDevs.Get(src), gnbDevs.Get(dst));
+        }
+    }
     if (stallEvery > 0)
     {
         Simulator::Schedule(Seconds(stallEvery), &Stall, Seconds(stallEvery), stallMs);

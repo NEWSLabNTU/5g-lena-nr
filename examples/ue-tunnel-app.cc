@@ -143,6 +143,12 @@ UeTunnelApp::GetOutOfServiceDrops() const
     return m_outOfServiceDrops;
 }
 
+uint64_t
+UeTunnelApp::GetRxPackets() const
+{
+    return m_rxPackets;
+}
+
 void
 UeTunnelApp::SetHandoverWindow(Time hoStart, Time hoEnd, double networkDelayMs)
 {
