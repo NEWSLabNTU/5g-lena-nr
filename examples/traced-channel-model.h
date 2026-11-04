@@ -94,6 +94,7 @@ class TracedChannelModel : public MatrixBasedChannelModel
     mutable std::mutex m_mutex;
     int64_t m_frame;                                ///< frame of m_paths
     Time m_frameTime;                               ///< when ns-3 first used it
+    Time m_frameStamp;                              ///< matrices' m_generatedTime, unique per frame
     std::map<int, std::vector<Path>> m_paths;       ///< newest complete frame
     std::map<int, std::vector<Path>> m_pending;     ///< frame being received
     int64_t m_pendingFrame;

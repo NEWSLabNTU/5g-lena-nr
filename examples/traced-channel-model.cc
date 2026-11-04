@@ -215,6 +215,12 @@ TracedChannelModel::GetChannel(Ptr<const MobilityModel> aMob,
         m_cachedFrame = m_frame;
         // The phase reference of this frame's gains: when ns-3 first uses them.
         m_frameTime = Simulator::Now();
+        // The matrices' generation stamp, distinct for each frame: the spectrum
+        // model keeps its long-term component while the stamp and the beams are
+        // unchanged, so a second frame taken up at the same instant (the RT
+        // server's frames arriving during a long cell scan) would otherwise be
+        // used with the first frame's long term, sized for its clusters.
+        m_frameStamp = m_frameTime > m_frameStamp ? m_frameTime : m_frameStamp + TimeStep(1);
     }
     auto cached = m_matrices.find(key);
     if (cached != m_matrices.end())
@@ -237,7 +243,7 @@ TracedChannelModel::GetChannel(Ptr<const MobilityModel> aMob,
     size_t numClusters = std::max<size_t>(paths.size(), 1);
     Complex3DVector h(uSize, sSize, numClusters);
     Ptr<ChannelParams> params = Create<ChannelParams>();
-    params->m_generatedTime = m_frameTime;
+    params->m_generatedTime = m_frameStamp;
     params->m_nodeIds = std::make_pair(aNode, bNode);
     params->m_angle.assign(4, DoubleVector(numClusters, 0.0));
     params->m_cachedAngleSincos.assign(4,
@@ -308,7 +314,7 @@ TracedChannelModel::GetChannel(Ptr<const MobilityModel> aMob,
     }
     Ptr<ChannelMatrix> m = Create<ChannelMatrix>();
     m->m_channel = h;
-    m->m_generatedTime = m_frameTime;
+    m->m_generatedTime = m_frameStamp;
     m->m_nodeIds = std::make_pair(aNode, bNode);
     m->m_antennaPair = std::make_pair(aAntenna->GetId(), bAntenna->GetId());
     m_matrices[key] = m;
