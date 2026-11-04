@@ -219,6 +219,7 @@ build_lib_example(
   LIBRARIES_TO_LINK ${libnr}
                     ${libtap-bridge}
                     ${libapplications}
+                    ${libinternet-apps}
 )
 
 build_lib_example(

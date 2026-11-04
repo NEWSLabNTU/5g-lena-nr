@@ -42,6 +42,7 @@
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/csma-module.h"
+#include "ns3/internet-apps-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/nr-module.h"
@@ -942,6 +943,34 @@ main(int argc, char* argv[])
             }
         };
         Simulator::Schedule(Seconds(1), &Report::Run, numUes);
+
+        // TCP and ICMP from vehicle 0 to the RSU, as Zenoh's tcp link and ping do.
+        PacketSinkHelper tcpSink("ns3::TcpSocketFactory",
+                                 InetSocketAddress(Ipv4Address::GetAny(), 7447));
+        ApplicationContainer sinkApp = tcpSink.Install(edgeGhost);
+        sinkApp.Start(Seconds(1.0));
+        BulkSendHelper bulk("ns3::TcpSocketFactory", InetSocketAddress(Ipv4Address("10.1.1.2"), 7447));
+        bulk.SetAttribute("MaxBytes", UintegerValue(0));
+        bulk.SetAttribute("SendSize", UintegerValue(1000));
+        ApplicationContainer bulkApp = bulk.Install(ghosts[0]);
+        bulkApp.Start(Seconds(2.0));
+        static Ptr<PacketSink> sink = DynamicCast<PacketSink>(sinkApp.Get(0));
+        struct TcpReport
+        {
+            static void Run()
+            {
+                std::cout << Simulator::Now().As(Time::S) << " self-test TCP vehicle 0 -> RSU: "
+                          << sink->GetTotalRx() << " B" << std::endl;
+                Simulator::Schedule(Seconds(1), &TcpReport::Run);
+            }
+        };
+        Simulator::Schedule(Seconds(1), &TcpReport::Run);
+        PingHelper ping(Ipv4Address("10.1.1.2"));
+        ping.SetAttribute("Interval", TimeValue(Seconds(1)));
+        ping.SetAttribute("Count", UintegerValue(3));
+        ping.SetAttribute("VerboseMode", EnumValue(Ping::VerboseMode::VERBOSE));
+        ApplicationContainer pingApp = ping.Install(ghosts[0]);
+        pingApp.Start(Seconds(2.0));
     }
     {
         std::istringstream plan(hoPlan);
