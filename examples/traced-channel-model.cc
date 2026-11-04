@@ -68,7 +68,6 @@ TracedChannelModel::TracedChannelModel()
       m_frequency(3.5e9),
       m_socket(-1),
       m_stop(false),
-      m_gnbNode(0),
       m_frame(-1),
       m_pendingFrame(-1),
       m_cachedFrame(-2)
@@ -110,9 +109,11 @@ TracedChannelModel::SetPaths(int64_t frame, const std::map<int, std::vector<Path
 }
 
 void
-TracedChannelModel::SetNodes(uint32_t gnbNode, const std::vector<uint32_t>& ueNodes, bool listen)
+TracedChannelModel::SetNodes(const std::vector<uint32_t>& gnbNodes,
+                             const std::vector<uint32_t>& ueNodes,
+                             bool listen)
 {
-    m_gnbNode = gnbNode;
+    m_gnbNodes = std::set<uint32_t>(gnbNodes.begin(), gnbNodes.end());
     for (size_t k = 0; k < ueNodes.size(); ++k)
     {
         m_ueByNode[ueNodes[k]] = static_cast<int>(k);
@@ -221,9 +222,9 @@ TracedChannelModel::GetChannel(Ptr<const MobilityModel> aMob,
         return cached->second; // reciprocal: the same matrix serves both directions
     }
     int ue = UeOf(aNode) >= 0 ? UeOf(aNode) : UeOf(bNode);
-    bool aIsGnb = aNode == m_gnbNode;
+    bool aIsGnb = m_gnbNodes.count(aNode) > 0;
     std::vector<Path> paths;
-    if (ue >= 0 && (aIsGnb || bNode == m_gnbNode))
+    if (ue >= 0 && (aIsGnb || m_gnbNodes.count(bNode) > 0))
     {
         auto it = m_paths.find(ue);
         if (it != m_paths.end())

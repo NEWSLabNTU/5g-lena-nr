@@ -208,7 +208,7 @@ main(int argc, char* argv[])
         ->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
     if (tracedModel)
     {
-        tracedModel->SetNodes(gnbNodes.Get(0)->GetId(), {ueNodes.Get(0)->GetId()}, false);
+        tracedModel->SetNodes({gnbNodes.Get(0)->GetId()}, {ueNodes.Get(0)->GetId()}, false);
         Vector g(0, 0, 10);
         Vector u(100, 0, 1.5);
         Feed(tracedModel, 1, {LosPath(g, u, 3.5e9, 0)}, "free-space line of sight");

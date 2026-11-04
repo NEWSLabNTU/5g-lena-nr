@@ -102,12 +102,26 @@ struct UeRadio
     uint32_t lossN = 0;
     bool inService = false;   ///< RRC connected (CONNECTED_NORMALLY)
     uint32_t failures = 0;    ///< radio link failures declared
+    uint16_t cell = 0;        ///< serving cell id (a sector)
+    uint32_t handovers = 0;   ///< handovers completed
     Ptr<UeTunnelApp> tunnel;
+    /// The data channels' transport blocks over the period (RxPacketTrace at the
+    /// gNB for the uplink, at the UE for the downlink): count, corrupt, re-sent
+    /// (redundancy version above 0), SINR (linear) and MCS sums.
+    struct Tb
+    {
+        uint32_t n = 0;
+        uint32_t corrupt = 0;
+        uint32_t retx = 0;
+        double sinrSum = 0;
+        double mcsSum = 0;
+    } ul, dl;
 };
 
 std::vector<UeRadio> g_radio;
 std::map<uint32_t, uint32_t> g_ueByNode; ///< node id -> UE index
 std::map<uint64_t, uint32_t> g_ueByImsi; ///< IMSI -> UE index
+std::map<uint32_t, uint32_t> g_ueByRnti; ///< (cell id << 16 | RNTI) -> UE index
 double g_ueTxPowerDbm = 23.0;
 double g_ulNoiseDbm = -174.0 + 10 * std::log10(360e3) + 5.0; ///< thermal over one RB, gNB NF 5 dB
 
@@ -123,13 +137,56 @@ OnCtrlSinr(uint32_t k, uint16_t, uint16_t, double sinr, uint16_t)
 /// 38.331: N310 out-of-sync indications, then T310 without N311 in-sync ones)
 /// takes it to idle, cell selection and a new RRC set-up with random access.
 void
-OnRrcState(std::string, uint64_t imsi, uint16_t, uint16_t, NrUeRrc::State, NrUeRrc::State to)
+OnRrcState(std::string, uint64_t imsi, uint16_t cellId, uint16_t rnti, NrUeRrc::State, NrUeRrc::State to)
 {
     auto it = g_ueByImsi.find(imsi);
     if (it != g_ueByImsi.end())
     {
         g_radio[it->second].inService = to == NrUeRrc::CONNECTED_NORMALLY;
+        g_radio[it->second].cell = cellId;
+        g_ueByRnti[(uint32_t(cellId) << 16) | rnti] = it->second;
     }
+}
+
+/// A handover completed: the UE now on cellId with rnti.
+void
+OnHandoverOk(std::string, uint64_t imsi, uint16_t cellId, uint16_t rnti)
+{
+    auto it = g_ueByImsi.find(imsi);
+    if (it != g_ueByImsi.end())
+    {
+        ++g_radio[it->second].handovers;
+        g_radio[it->second].cell = cellId;
+        g_ueByRnti[(uint32_t(cellId) << 16) | rnti] = it->second;
+    }
+}
+
+void
+AddTb(UeRadio::Tb& tb, const RxPacketTraceParams& p)
+{
+    ++tb.n;
+    tb.corrupt += p.m_corrupt ? 1 : 0;
+    tb.retx += p.m_rv > 0 ? 1 : 0;
+    tb.sinrSum += p.m_sinr;
+    tb.mcsSum += p.m_mcs;
+}
+
+/// An uplink transport block received at the gNB.
+void
+OnUlTb(RxPacketTraceParams p)
+{
+    auto it = g_ueByRnti.find((uint32_t(p.m_cellId) << 16) | p.m_rnti);
+    if (it != g_ueByRnti.end())
+    {
+        AddTb(g_radio[it->second].ul, p);
+    }
+}
+
+/// A downlink transport block received at UE k.
+void
+OnDlTb(uint32_t k, RxPacketTraceParams p)
+{
+    AddTb(g_radio[k].dl, p);
 }
 
 void
@@ -158,7 +215,9 @@ OnCtrlLoss(uint16_t, uint8_t, uint32_t node, double lossDb)
 /// condition, its distance to the gNB, mean DL control SINR and coupling loss
 /// over the period, the UL SNR that loss implies, whether it is RRC connected,
 /// its radio link failures so far and the tunnel's drops (0 since the own
-/// reattach model is gone).
+/// reattach model is gone); then each data channel's transport blocks over the
+/// period: mean SINR, the corrupt share, the re-sent share, the mean MCS and the
+/// count (uplink at the gNB, downlink at the UE).
 void
 TraceRadio(std::ofstream* out,
            Ptr<SimClockSynchronizer> clock,
@@ -178,7 +237,21 @@ TraceRadio(std::ofstream* out,
         *out << Simulator::Now().GetSeconds() << "," << world << "," << k << "," << p.x << ","
              << p.y << "," << p.z << "," << cond << "," << CalculateDistance(p, gnb) << ","
              << sinrDb << "," << loss << "," << ulSnr << "," << (r.inService ? 1 : 0) << "," << r.failures
-             << "," << r.tunnel->GetOutOfServiceDrops() << "\n";
+             << "," << r.tunnel->GetOutOfServiceDrops();
+        for (UeRadio::Tb* tb : {&r.ul, &r.dl})
+        {
+            if (tb->n)
+            {
+                *out << "," << 10 * std::log10(tb->sinrSum / tb->n) << "," << double(tb->corrupt) / tb->n << ","
+                     << double(tb->retx) / tb->n << "," << tb->mcsSum / tb->n << "," << tb->n;
+            }
+            else
+            {
+                *out << ",,,,,0";
+            }
+            *tb = UeRadio::Tb();
+        }
+        *out << "," << r.cell << "," << r.handovers << "\n";
         r.ctrlSinrSum = 0;
         r.ctrlSinrN = 0;
         r.lossSum = 0;
@@ -266,6 +339,7 @@ main(int argc, char* argv[])
     double gnbBearing = 0.0;
     double gnbDowntilt = 0.0;
     std::string beamformingMethod = "direct";
+    uint32_t sectors = 1;
     std::string simClockTrace = "";
 
     CommandLine cmd(__FILE__);
@@ -284,6 +358,10 @@ main(int argc, char* argv[])
     cmd.AddValue("bandwidth", "Bandwidth in Hz", bandwidth);
     cmd.AddValue("numerology", "NR numerology (0-4)", numerology);
     cmd.AddValue("gnbTxPower", "gNB TX power in dBm", gnbTxPower);
+    cmd.AddValue("sectors",
+                 "Sectors of the site: co-located gNBs, the first facing --gnbBearing, the others "
+                 "turned 360/N degrees each, sharing the carrier, with X2 and A3-RSRP handover",
+                 sectors);
     cmd.AddValue("gnbRows", "gNB panel rows", gnbRows);
     cmd.AddValue("gnbCols", "gNB panel columns", gnbCols);
     cmd.AddValue("gnbElement",
@@ -387,14 +465,17 @@ main(int argc, char* argv[])
     // Nodes and positions
     //--------------------------------------------------------------------------
     NodeContainer gnbNodes;
-    gnbNodes.Create(1);
+    gnbNodes.Create(sectors);
     NodeContainer ueNodes;
     ueNodes.Create(numUes);
 
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobility.Install(gnbNodes);
-    gnbNodes.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(gnbX, gnbY, gnbHeight));
+    for (uint32_t s = 0; s < sectors; ++s)
+    {
+        gnbNodes.Get(s)->GetObject<MobilityModel>()->SetPosition(Vector(gnbX, gnbY, gnbHeight));
+    }
     mobility.Install(ueNodes);
     for (uint32_t k = 0; k < numUes; ++k)
     {
@@ -464,7 +545,7 @@ main(int argc, char* argv[])
     {
         nrHelper->SetGnbAntennaAttribute("AntennaElement", PointerValue(CreateObject<IsotropicAntennaModel>()));
     }
-    nrHelper->SetGnbAntennaAttribute("BearingAngle", DoubleValue(gnbBearing * M_PI / 180.0));
+    // Each sector's bearing is set as its device is installed, below.
     nrHelper->SetGnbAntennaAttribute("DowntiltAngle", DoubleValue(gnbDowntilt * M_PI / 180.0));
     nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(1));
     nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(2));
@@ -489,16 +570,36 @@ main(int argc, char* argv[])
     Config::SetDefault("ns3::NrGnbRrc::EpsBearerToRlcMapping", EnumValue(NrGnbRrc::RLC_UM_ALWAYS));
     Config::SetDefault("ns3::NrRlcUm::MaxTxBufferSize", UintegerValue(1024 * 1024));
 
-    NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
+    if (sectors > 1)
+    {
+        nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
+        nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
+        nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(256)));
+    }
+    NetDeviceContainer gnbDevs;
+    std::vector<double> bearings;
+    for (uint32_t s = 0; s < sectors; ++s)
+    {
+        double b = std::remainder(gnbBearing + 360.0 * s / sectors, 360.0);
+        bearings.push_back(b);
+        nrHelper->SetGnbAntennaAttribute("BearingAngle", DoubleValue(b * M_PI / 180.0));
+        gnbDevs.Add(nrHelper->InstallGnbDevice(gnbNodes.Get(s), allBwps));
+    }
     NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
     g_ueTxPowerDbm = ueTxPower;
     g_ulNoiseDbm = -174.0 + 10 * std::log10(12 * 15e3 * (1 << numerology)) + 5.0; // one RB
     g_radio.resize(numUes);
+    for (uint32_t s = 0; s < sectors; ++s)
+    {
+        DynamicCast<NrGnbNetDevice>(gnbDevs.Get(s))->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+            "RxPacketTraceGnb", MakeCallback(&OnUlTb));
+    }
     for (uint32_t k = 0; k < numUes; ++k)
     {
         g_ueByNode[ueNodes.Get(k)->GetId()] = k;
         Ptr<NrUePhy> phy = DynamicCast<NrUeNetDevice>(ueDevs.Get(k))->GetPhy(0);
         phy->TraceConnectWithoutContext("DlCtrlSinr", MakeBoundCallback(&OnCtrlSinr, k));
+        phy->GetSpectrumPhy()->TraceConnectWithoutContext("RxPacketTraceUe", MakeBoundCallback(&OnDlTb, k));
         phy->GetSpectrumPhy()->EnableDlCtrlPathlossTrace();
         phy->GetSpectrumPhy()->TraceConnectWithoutContext("DlCtrlPathloss", MakeCallback(&OnCtrlLoss));
     }
@@ -603,7 +704,31 @@ main(int argc, char* argv[])
     edgeTunnel->SetStopTime(Seconds(simTime));
     std::cout << "edge: " << tapEdge << ", RSU subnet 10.1.1.0/24, edge server " << edgeIp << std::endl;
 
-    nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
+    if (sectors > 1)
+    {
+        nrHelper->AddX2Interface(gnbNodes);
+        // Each UE starts on the sector whose bearing is nearest its direction from
+        // the site; A3-RSRP handover moves it on as it turns.
+        for (uint32_t k = 0; k < numUes; ++k)
+        {
+            Vector p = positions[k];
+            double dir = std::atan2(p.y - gnbY, p.x - gnbX) * 180.0 / M_PI;
+            uint32_t best = 0;
+            for (uint32_t s = 1; s < sectors; ++s)
+            {
+                if (std::abs(std::remainder(dir - bearings[s], 360.0)) <
+                    std::abs(std::remainder(dir - bearings[best], 360.0)))
+                {
+                    best = s;
+                }
+            }
+            nrHelper->AttachToGnb(ueDevs.Get(k), gnbDevs.Get(best));
+        }
+    }
+    else
+    {
+        nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
+    }
     if (tracedModel)
     {
         std::vector<uint32_t> ueNodeIds;
@@ -611,12 +736,19 @@ main(int argc, char* argv[])
         {
             ueNodeIds.push_back(ueNodes.Get(k)->GetId());
         }
-        tracedModel->SetNodes(gnbNodes.Get(0)->GetId(), ueNodeIds);
+        std::vector<uint32_t> gnbNodeIds;
+        for (uint32_t s = 0; s < sectors; ++s)
+        {
+            gnbNodeIds.push_back(gnbNodes.Get(s)->GetId());
+        }
+        tracedModel->SetNodes(gnbNodeIds, ueNodeIds);
     }
     for (uint32_t k = 0; k < numUes; ++k)
     {
         g_ueByImsi[DynamicCast<NrUeNetDevice>(ueDevs.Get(k))->GetImsi()] = k;
     }
+    Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/NrUeRrc/HandoverEndOk",
+                    MakeCallback(&OnHandoverOk));
     Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/NrUeRrc/StateTransition",
                     MakeCallback(&OnRrcState));
     Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/NrUeRrc/RadioLinkFailure",
@@ -638,7 +770,8 @@ main(int argc, char* argv[])
         trace.open(traceFile);
         NS_ABORT_MSG_IF(!trace, "cannot write " << traceFile);
         trace << "t_ns3,t_world,ue,x,y,z,condition,distance_m,ctrl_sinr_db,coupling_loss_db,"
-                 "ul_snr_rb_db,in_service,failures,oos_drops\n";
+                 "ul_snr_rb_db,in_service,failures,oos_drops,ul_sinr_db,ul_bler,ul_retx,ul_mcs,ul_tbs,"
+                 "dl_sinr_db,dl_bler,dl_retx,dl_mcs,dl_tbs,cell,handovers\n";
         Simulator::Schedule(Seconds(tracePeriod),
                             &TraceRadio,
                             &trace,

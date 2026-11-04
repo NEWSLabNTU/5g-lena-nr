@@ -10,6 +10,7 @@
 #include <atomic>
 #include <complex>
 #include <map>
+#include <set>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -52,7 +53,7 @@ class TracedChannelModel : public MatrixBasedChannelModel
 
     /// The gNB's node and each UE's node, by the RT server's UE index; starts
     /// listening for the RT server unless `listen` is false (tests).
-    void SetNodes(uint32_t gnbNode, const std::vector<uint32_t>& ueNodes, bool listen = true);
+    void SetNodes(const std::vector<uint32_t>& gnbNodes, const std::vector<uint32_t>& ueNodes, bool listen = true);
 
     struct Path;
     /// A complete frame of paths by UE index, as if it had arrived (tests).
@@ -87,7 +88,7 @@ class TracedChannelModel : public MatrixBasedChannelModel
     int m_socket;
     std::thread m_thread;
     std::atomic<bool> m_stop;
-    uint32_t m_gnbNode;
+    std::set<uint32_t> m_gnbNodes; ///< the site's sectors: co-located, so one set of paths serves them all
     std::map<uint32_t, int> m_ueByNode;
 
     mutable std::mutex m_mutex;
