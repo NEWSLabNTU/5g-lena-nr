@@ -38,6 +38,7 @@
 #include <iomanip>
 #include <chrono>
 #include <iostream>
+#include <sstream>
 #include <thread>
 
 using namespace ns3;
@@ -55,6 +56,7 @@ double g_freq = 3.5e9;
 Vector g_gnb(0, 0, 25);
 std::vector<Vector> g_ues;
 double g_lateAt = 1.0;
+bool g_flicker = true;
 double g_allLateAt = -1; ///< no UE has paths before this
 uint32_t g_numPaths = 0; ///< paths per UE (0: 1 to 5, changing per frame)
 double g_cutAt = -1;  ///< UE 0 loses its paths from here (radio link failure)
@@ -120,7 +122,7 @@ MakeFrame(int64_t frame, bool late)
     for (size_t k = 0; k < g_ues.size(); ++k)
     {
         std::vector<TracedChannelModel::Path> paths;
-        bool none = (g_allLateAt >= 0 && now < g_allLateAt) || (k == 1 && !late) || (k == 2 && frame % 3 == 0) ||
+        bool none = (g_allLateAt >= 0 && now < g_allLateAt) || (k == 1 && !late) || (g_flicker && k == 2 && frame % 3 == 0) ||
                     (k == 0 && g_cutAt >= 0 && now >= g_cutAt && now < g_backAt);
         if (!none)
         {
@@ -156,6 +158,9 @@ main(int argc, char* argv[])
     double gnbBearing = 30;
     double speed = 20;
     bool attachFacing = true;
+    uint32_t attachShift = 0;
+    double ring = 0;
+    std::string hoPlan;
     bool ofdmaRr = true;
     bool skipSameKind = true;
     std::string tbTrace;
@@ -182,6 +187,10 @@ main(int argc, char* argv[])
     cmd.AddValue("hoHysteresis", "A3-RSRP hysteresis, dB", hoHysteresis);
     cmd.AddValue("hoTtt", "A3-RSRP time to trigger, ms", hoTtt);
     cmd.AddValue("ofdmaRr", "NrMacSchedulerOfdmaRR as nr-v2x-edge (else the default)", ofdmaRr);
+    cmd.AddValue("ring", "if > 0: UEs stand on a circle of this radius, m, 120 deg apart from east (as the lab's)", ring);
+    cmd.AddValue("hoPlan", "manual handovers instead of A3: t_s,ue,source_sector,target_sector;...", hoPlan);
+    cmd.AddValue("attachShift", "attach each UE to the sector this many past the facing one (simultaneous handovers)", attachShift);
+    cmd.AddValue("flicker", "UE 2 loses its paths every third frame", g_flicker);
     cmd.AddValue("attachFacing", "attach to the sector facing each UE (else the closest gNB)", attachFacing);
     cmd.AddValue("simTime", "s", simTime);
     cmd.AddValue("framePeriod", "ms between traced frames", framePeriodMs);
@@ -224,6 +233,15 @@ main(int argc, char* argv[])
     // UE 0 drives north past the site at x = 100, UE 1 south at x = -80, UE 2 stands.
     std::vector<Vector> all = {Vector(100, -150, 1.5), Vector(-80, 150, 1.5), Vector(-60, -90, 1.5)};
     std::vector<Vector> vel = {Vector(0, speed, 0), Vector(0, -speed, 0), Vector(0, 0, 0)};
+    if (ring > 0)
+    {
+        for (uint32_t k = 0; k < 3; ++k)
+        {
+            double a = 2 * M_PI * k / 3;
+            all[k] = Vector(g_gnb.x + ring * std::cos(a), g_gnb.y + ring * std::sin(a), 1.5);
+            vel[k] = Vector(0, 0, 0);
+        }
+    }
     for (uint32_t k = 0; k < numUes; ++k)
     {
         g_ues.push_back(all[k]);
@@ -283,7 +301,11 @@ main(int argc, char* argv[])
     nrHelper->SetGnbPhyAttribute("Numerology", UintegerValue(numerology));
     nrHelper->SetUePhyAttribute("TxPower", DoubleValue(23.0));
 
-    if (sectors > 1)
+    if (sectors > 1 && !hoPlan.empty())
+    {
+        nrHelper->SetHandoverAlgorithmType("ns3::NrNoOpHandoverAlgorithm");
+    }
+    else if (sectors > 1)
     {
         nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
         nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(hoHysteresis));
@@ -340,6 +362,7 @@ main(int argc, char* argv[])
                     best = s;
                 }
             }
+            best = (best + attachShift) % sectors;
             std::cout << "UE " << k << " attaches to sector " << best << std::endl;
             nrHelper->AttachToGnb(ueDevs.Get(k), gnbDevs.Get(best));
         }
@@ -347,6 +370,21 @@ main(int argc, char* argv[])
     else
     {
         nrHelper->AttachToClosestGnb(ueDevs, gnbDevs);
+    }
+    {
+        std::istringstream plan(hoPlan);
+        std::string item;
+        while (std::getline(plan, item, ';'))
+        {
+            double t;
+            uint32_t ue;
+            uint32_t src;
+            uint32_t dst;
+            char c;
+            std::istringstream is(item);
+            NS_ABORT_MSG_IF(!(is >> t >> c >> ue >> c >> src >> c >> dst), "bad --hoPlan item " << item);
+            nrHelper->HandoverRequest(Seconds(t), ueDevs.Get(ue), gnbDevs.Get(src), gnbDevs.Get(dst));
+        }
     }
     std::vector<uint32_t> gnbIds;
     for (uint32_t s = 0; s < sectors; ++s)
