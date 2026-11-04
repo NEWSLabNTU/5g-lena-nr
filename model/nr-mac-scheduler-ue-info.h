@@ -12,6 +12,7 @@
 
 #include "ns3/matrix-array.h"
 
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <unordered_map>
@@ -271,9 +272,25 @@ class NrMacSchedulerUeInfo
     std::vector<uint8_t> m_ulSym;  //!< Corresponding symbol of m_ulRBG in this slot
 
     uint8_t m_dlMcs{0}; //!< DL MCS
+    uint8_t m_dlMcsCsi{0}; //!< DL MCS from the CSI, before the outer loop's offset
+    double m_dlOlla{0.0};  //!< DL outer-loop link adaptation offset, MCS indices (>= 0)
     std::optional<uint8_t>
         m_fhMaxMcsAssignable; //!< Maximum DL MCS assignable due to FH limitations
     uint8_t m_ulMcs{0};       //!< UL MCS
+    uint8_t m_ulMcsCsi{0};    //!< UL MCS from the SRS/PUSCH SINR, before the outer loop's offset
+    double m_ulOlla{0.0};     //!< UL outer-loop link adaptation offset, MCS indices (>= 0)
+
+    /**
+     * @brief The MCS the outer loop allows: the CSI's MCS less the rounded offset.
+     * @param csiMcs the MCS from the channel state
+     * @param offset the outer loop's offset, MCS indices
+     * @return the MCS to use
+     */
+    static uint8_t ApplyOlla(uint8_t csiMcs, double offset)
+    {
+        long mcs = static_cast<long>(csiMcs) - std::lround(offset);
+        return static_cast<uint8_t>(mcs < 0 ? 0 : mcs);
+    }
 
     struct SbMcsInfo
     {

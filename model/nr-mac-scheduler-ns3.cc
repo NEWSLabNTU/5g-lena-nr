@@ -17,6 +17,7 @@
 #include "nr-mac-short-bsr-ce.h"
 
 #include "ns3/boolean.h"
+#include "ns3/double.h"
 #include "ns3/enum.h"
 #include "ns3/integer.h"
 #include "ns3/log.h"
@@ -207,6 +208,23 @@ NrMacSchedulerNs3::GetTypeId()
                           UintegerValue(0),
                           MakeUintegerAccessor(&NrMacSchedulerNs3::SetRachUlGrantMcs),
                           MakeUintegerChecker<uint8_t>())
+            .AddAttribute("OllaBlerTarget",
+                          "Outer-loop link adaptation: the BLER of first transmissions it holds "
+                          "the MCS at, by an offset raised OllaStep on each NACK and lowered "
+                          "OllaStep * t / (1 - t) on each ACK (0: off)",
+                          DoubleValue(0.0),
+                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaBlerTarget),
+                          MakeDoubleChecker<double>(0.0, 0.5))
+            .AddAttribute("OllaStep",
+                          "Outer-loop link adaptation: the offset's step on a NACK, MCS indices",
+                          DoubleValue(0.5),
+                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaStep),
+                          MakeDoubleChecker<double>(0.0))
+            .AddAttribute("OllaMaxOffset",
+                          "Outer-loop link adaptation: the offset's largest value, MCS indices",
+                          DoubleValue(10.0),
+                          MakeDoubleAccessor(&NrMacSchedulerNs3::m_ollaMaxOffset),
+                          MakeDoubleChecker<double>(0.0))
             .AddAttribute(
                 "McsCsiSource",
                 "Choose which CSI information is used to estimate DL MCS(default AVG_MCS)",
@@ -581,8 +599,10 @@ NrMacSchedulerNs3::DoCschedUeConfigReq(
         UeInfoOf(*itUe)->m_ulHarq.SetMaxSize(
             static_cast<uint8_t>(m_macSchedSapUser->GetNumHarqProcess()));
         UeInfoOf(*itUe)->m_dlMcs = m_startMcsDl;
+        UeInfoOf(*itUe)->m_dlMcsCsi = m_startMcsDl;
         UeInfoOf(*itUe)->m_startMcsDlUe = m_startMcsDl;
         UeInfoOf(*itUe)->m_ulMcs = m_startMcsUl;
+        UeInfoOf(*itUe)->m_ulMcsCsi = m_startMcsUl;
         UeInfoOf(*itUe)->m_dlAmc = m_dlAmc;
         UeInfoOf(*itUe)->m_ulAmc = m_ulAmc;
         UeInfoOf(*itUe)->m_mcsCsiSource = m_mcsCsiSource;
@@ -1102,6 +1122,27 @@ NrMacSchedulerNs3::ProcessHARQFeedbacks(
 
         // RV number should not be greater than 3
         NS_ASSERT(ueProcess.m_dciElement->m_rv < 4);
+
+        // Outer-loop link adaptation on first transmissions: back the MCS off on
+        // a NACK, creep back on ACKs, holding the BLER at the target.
+        if (m_ollaBlerTarget > 0.0 && ueProcess.m_dciElement->m_rv == 0)
+        {
+            const auto& ue = m_ueMap.find(rnti)->second;
+            bool ul = direction == "UL";
+            double& offset = ul ? ue->m_ulOlla : ue->m_dlOlla;
+            offset += harqFeedbackIt->IsReceivedOk()
+                          ? -m_ollaStep * m_ollaBlerTarget / (1.0 - m_ollaBlerTarget)
+                          : m_ollaStep;
+            offset = std::clamp(offset, 0.0, m_ollaMaxOffset);
+            if (ul)
+            {
+                ue->m_ulMcs = NrMacSchedulerUeInfo::ApplyOlla(ue->m_ulMcsCsi, offset);
+            }
+            else
+            {
+                ue->m_dlMcs = NrMacSchedulerUeInfo::ApplyOlla(ue->m_dlMcsCsi, offset);
+            }
+        }
         uint8_t maxHarqReTx = m_enableHarqReTx ? 3 : 0;
 
         if (harqFeedbackIt->IsReceivedOk() || ueProcess.m_dciElement->m_rv == maxHarqReTx)

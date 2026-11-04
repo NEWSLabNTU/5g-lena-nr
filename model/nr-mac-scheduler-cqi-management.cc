@@ -77,6 +77,8 @@ NrMacSchedulerCQIManagement::UlSBCQIReported(
 
     // MCS updated inside the function; crappy API... but we can't fix everything
     ueInfo->m_ulCqi.m_wbCqi = GetAmcUl()->CreateCqiFeedbackSiso(specVals, ueInfo->m_ulMcs);
+    ueInfo->m_ulMcsCsi = ueInfo->m_ulMcs;
+    ueInfo->m_ulMcs = NrMacSchedulerUeInfo::ApplyOlla(ueInfo->m_ulMcsCsi, ueInfo->m_ulOlla);
     NS_LOG_DEBUG("Calculated MCS for RNTI " << ueInfo->m_rnti << " is " << ueInfo->m_ulMcs);
 }
 
@@ -134,9 +136,10 @@ NrMacSchedulerCQIManagement::DlCqiReported(const DlCqiInfo& info,
     ueInfo->m_dlCqi.m_timer = expirationTime;
     ueInfo->m_dlCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
     ueInfo->m_dlCqi.m_wbCqi = info.m_wbCqi;
-    ueInfo->m_dlMcs =
+    ueInfo->m_dlMcsCsi =
         std::min(static_cast<uint8_t>(GetAmcDl()->GetMcsFromCqi(ueInfo->m_dlCqi.m_wbCqi)),
                  static_cast<uint8_t>(maxDlMcs));
+    ueInfo->m_dlMcs = NrMacSchedulerUeInfo::ApplyOlla(ueInfo->m_dlMcsCsi, ueInfo->m_dlOlla);
 
     ueInfo->m_dlCqi.m_sbCqi = info.m_sbCqis;
     ueInfo->m_dlSbMcsInfo.clear();
@@ -212,6 +215,7 @@ NrMacSchedulerCQIManagement::RefreshDlCqiMaps(
             ue->m_dlCqi.m_wbCqi = 1; // lowest value for trying a transmission
             ue->m_dlCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
             ue->m_dlMcs = GetStartMcsDl();
+            ue->m_dlMcsCsi = ue->m_dlMcs;
         }
         else
         {
@@ -235,6 +239,7 @@ NrMacSchedulerCQIManagement::RefreshUlCqiMaps(
             ue->m_ulCqi.m_wbCqi = 1; // lowest value for trying a transmission
             ue->m_ulCqi.m_cqiType = NrMacSchedulerUeInfo::CqiInfo::WB;
             ue->m_ulMcs = GetStartMcsUl();
+            ue->m_ulMcsCsi = ue->m_ulMcs;
         }
         else
         {

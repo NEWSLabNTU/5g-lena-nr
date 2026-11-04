@@ -964,6 +964,9 @@ class NrMacSchedulerNs3 : public NrMacScheduler
     friend NrSchedGeneralTestCase;
 
     bool m_enableHarqReTx{true}; //!< Flag to enable or disable HARQ ReTx (attribute)
+    double m_ollaBlerTarget{0.0};  //!< Outer-loop link adaptation's BLER target (0: off)
+    double m_ollaStep{0.5};        //!< Its step up on a NACK, in MCS indices
+    double m_ollaMaxOffset{10.0};  //!< Its largest offset, in MCS indices
 
     TracedCallback<uint16_t, uint16_t, const std::shared_ptr<NrMacSchedulerUeInfo>&>
         m_csiFeedbackReceived; //!< Traced callback to access CSI feedback
