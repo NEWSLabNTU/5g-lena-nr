@@ -907,7 +907,11 @@ NrGnbMac::DoReceivePhyPdu(Ptr<Packet> p)
 
     if (rntiIt == m_rlcAttached.end())
     {
-        NS_ASSERT_MSG(false, "could not find RNTI" << rnti);
+        // A TB of a UE whose context was removed while it was in the air (the
+        // UE's radio link failure, a handover): no RLC is left to take it, and
+        // going on would dereference the end iterator.
+        NS_LOG_INFO("UL PDU of RNTI " << rnti << ", no longer attached: dropped");
+        return;
     }
 
     // Try to peek whatever header; in the first byte there will be the LC ID.
