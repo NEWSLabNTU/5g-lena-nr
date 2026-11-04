@@ -6,6 +6,7 @@
 #define TRACED_CHANNEL_MODEL_H
 
 #include "ns3/matrix-based-channel-model.h"
+#include "ns3/spectrum-transmit-filter.h"
 
 #include <atomic>
 #include <complex>
@@ -102,6 +103,29 @@ class TracedChannelModel : public MatrixBasedChannelModel
     std::map<uint64_t, Ptr<ChannelMatrix>> m_matrices;
     mutable std::map<uint64_t, Ptr<ChannelParams>> m_params;
     int64_t m_cachedFrame;
+};
+
+/**
+ * @brief Drops gNB-to-gNB and UE-to-UE signals before the channel evaluates them.
+ *
+ * With the traced channel there is no propagation loss model, so
+ * MultiModelSpectrumChannel ran the phased-array spectrum model for every
+ * receiver: a site's co-located sectors received each other's DL and the UEs
+ * each other's UL, at most of the run's cost and with nothing to receive them
+ * (TracedChannelModel gives those pairs its 300 dB "none" path). Cross-link
+ * interference between UEs is real in TDD, but the cells here are synchronized
+ * TDD and 5G-LENA has no sidelink in use, so nothing listens for it. gNB-UE
+ * signals pass unchanged.
+ */
+class TracedSameKindFilter : public SpectrumTransmitFilter
+{
+  public:
+    static TypeId GetTypeId();
+
+  private:
+    bool DoFilter(Ptr<const SpectrumSignalParameters> params,
+                  Ptr<const SpectrumPhy> receiverPhy) override;
+    int64_t DoAssignStreams(int64_t stream) override;
 };
 
 } // namespace ns3

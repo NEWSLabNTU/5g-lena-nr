@@ -527,6 +527,8 @@ main(int argc, char* argv[])
                 auto spectrum = bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel();
                 NS_ABORT_MSG_IF(!spectrum, "no phased-array spectrum model to trace into");
                 spectrum->SetAttribute("ChannelModel", PointerValue(tracedModel));
+                // No receiver listens for gNB-gNB or UE-UE signals: skip them.
+                bwp->GetChannel()->AddSpectrumTransmitFilter(CreateObject<TracedSameKindFilter>());
             }
         }
     }

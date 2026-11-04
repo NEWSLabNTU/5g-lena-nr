@@ -34,6 +34,8 @@
 #include "traced-channel-model.h"
 
 #include <atomic>
+#include <fstream>
+#include <iomanip>
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -43,6 +45,7 @@ using namespace ns3;
 namespace
 {
 
+std::ofstream g_tb; ///< --tbTrace
 uint64_t g_dl = 0;
 uint64_t g_ul = 0;
 std::vector<uint64_t> g_dlUe(3, 0);
@@ -67,6 +70,14 @@ void
 OnRxUe(std::vector<uint64_t>* v, uint32_t k, Ptr<const Packet>, const Address&, const Address&)
 {
     ++(*v)[k];
+}
+
+void
+OnTb(std::string dir, RxPacketTraceParams p)
+{
+    g_tb << Simulator::Now().GetTimeStep() << "," << dir << "," << p.m_cellId << "," << p.m_rnti << ","
+         << std::setprecision(17) << p.m_sinr << "," << p.m_tbler << "," << p.m_corrupt << ","
+         << +p.m_mcs << "," << p.m_tbSize << "\n";
 }
 
 void
@@ -146,6 +157,8 @@ main(int argc, char* argv[])
     double speed = 20;
     bool attachFacing = true;
     bool ofdmaRr = true;
+    bool skipSameKind = true;
+    std::string tbTrace;
     double simTime = 4.0;
     double framePeriodMs = 50;
     bool threaded = false;
@@ -162,6 +175,8 @@ main(int argc, char* argv[])
     cmd.AddValue("sectors", "co-located gNBs", sectors);
     cmd.AddValue("gnbBearing", "first sector's bearing, deg", gnbBearing);
     cmd.AddValue("speed", "UE 0 and 1 speed, m/s", speed);
+    cmd.AddValue("skipSameKind", "drop gNB-gNB and UE-UE signals (TracedSameKindFilter)", skipSameKind);
+    cmd.AddValue("tbTrace", "file for every TB's time, cell, RNTI, SINR, TBLER, corrupt", tbTrace);
     cmd.AddValue("ofdmaRr", "NrMacSchedulerOfdmaRR as nr-v2x-edge (else the default)", ofdmaRr);
     cmd.AddValue("attachFacing", "attach to the sector facing each UE (else the closest gNB)", attachFacing);
     cmd.AddValue("simTime", "s", simTime);
@@ -239,6 +254,10 @@ main(int argc, char* argv[])
             bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel()->SetAttribute(
                 "ChannelModel",
                 PointerValue(traced));
+            if (skipSameKind)
+            {
+                bwp->GetChannel()->AddSpectrumTransmitFilter(CreateObject<TracedSameKindFilter>());
+            }
         }
     }
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
@@ -406,6 +425,20 @@ main(int argc, char* argv[])
                         std::cout << Simulator::Now().As(Time::S) << " IMSI " << imsi << " RNTI "
                                   << rnti << ": handover done, cell " << cell << std::endl;
                     }));
+    if (!tbTrace.empty())
+    {
+        g_tb.open(tbTrace);
+        for (uint32_t s = 0; s < sectors; ++s)
+        {
+            DynamicCast<NrGnbNetDevice>(gnbDevs.Get(s))->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                "RxPacketTraceGnb", MakeBoundCallback(&OnTb, std::string("UL")));
+        }
+        for (uint32_t k = 0; k < numUes; ++k)
+        {
+            DynamicCast<NrUeNetDevice>(ueDevs.Get(k))->GetPhy(0)->GetSpectrumPhy()->TraceConnectWithoutContext(
+                "RxPacketTraceUe", MakeBoundCallback(&OnTb, std::string("DL")));
+        }
+    }
     Simulator::Schedule(MilliSeconds(500), &Report, MilliSeconds(500));
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();

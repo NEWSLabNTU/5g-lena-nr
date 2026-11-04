@@ -5,6 +5,10 @@
 #include "traced-channel-model.h"
 
 #include "ns3/double.h"
+#include "ns3/nr-gnb-net-device.h"
+#include "ns3/nr-ue-net-device.h"
+#include "ns3/spectrum-phy.h"
+#include "ns3/spectrum-signal-parameters.h"
 #include "ns3/log.h"
 #include "ns3/mobility-model.h"
 #include "ns3/node.h"
@@ -25,6 +29,7 @@ namespace ns3
 
 NS_LOG_COMPONENT_DEFINE("TracedChannelModel");
 NS_OBJECT_ENSURE_REGISTERED(TracedChannelModel);
+NS_OBJECT_ENSURE_REGISTERED(TracedSameKindFilter);
 
 std::atomic<int64_t> g_tracedChannelFrame{-1};
 
@@ -330,6 +335,39 @@ TracedChannelModel::GetParams(Ptr<const MobilityModel> aMob, Ptr<const MobilityM
     auto it = m_params.find(key);
     NS_ABORT_MSG_IF(it == m_params.end(), "GetParams before GetChannel for this pair");
     return it->second;
+}
+
+TypeId
+TracedSameKindFilter::GetTypeId()
+{
+    static TypeId tid = TypeId("ns3::TracedSameKindFilter")
+                            .SetParent<SpectrumTransmitFilter>()
+                            .SetGroupName("Nr")
+                            .AddConstructor<TracedSameKindFilter>();
+    return tid;
+}
+
+bool
+TracedSameKindFilter::DoFilter(Ptr<const SpectrumSignalParameters> params,
+                               Ptr<const SpectrumPhy> receiverPhy)
+{
+    Ptr<NetDevice> tx = params->txPhy ? params->txPhy->GetDevice() : nullptr;
+    Ptr<NetDevice> rx = receiverPhy->GetDevice();
+    if (!tx || !rx)
+    {
+        return false;
+    }
+    bool txGnb = DynamicCast<NrGnbNetDevice>(tx) != nullptr;
+    bool rxGnb = DynamicCast<NrGnbNetDevice>(rx) != nullptr;
+    bool txUe = DynamicCast<NrUeNetDevice>(tx) != nullptr;
+    bool rxUe = DynamicCast<NrUeNetDevice>(rx) != nullptr;
+    return (txGnb && rxGnb) || (txUe && rxUe);
+}
+
+int64_t
+TracedSameKindFilter::DoAssignStreams(int64_t)
+{
+    return 0;
 }
 
 } // namespace ns3
