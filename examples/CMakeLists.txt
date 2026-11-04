@@ -234,3 +234,11 @@ build_lib_example(
   LIBRARIES_TO_LINK ${libnr}
                     ${libapplications}
 )
+
+build_lib_example(
+  NAME nr-handover-repro
+  SOURCE_FILES nr-handover-repro.cc
+               traced-channel-model.cc
+  LIBRARIES_TO_LINK ${libnr}
+                    ${libapplications}
+)
