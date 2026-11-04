@@ -159,6 +159,8 @@ main(int argc, char* argv[])
     bool ofdmaRr = true;
     bool skipSameKind = true;
     std::string tbTrace;
+    double hoHysteresis = 3.0;
+    uint32_t hoTtt = 256;
     double simTime = 4.0;
     double framePeriodMs = 50;
     bool threaded = false;
@@ -177,6 +179,8 @@ main(int argc, char* argv[])
     cmd.AddValue("speed", "UE 0 and 1 speed, m/s", speed);
     cmd.AddValue("skipSameKind", "drop gNB-gNB and UE-UE signals (TracedSameKindFilter)", skipSameKind);
     cmd.AddValue("tbTrace", "file for every TB's time, cell, RNTI, SINR, TBLER, corrupt", tbTrace);
+    cmd.AddValue("hoHysteresis", "A3-RSRP hysteresis, dB", hoHysteresis);
+    cmd.AddValue("hoTtt", "A3-RSRP time to trigger, ms", hoTtt);
     cmd.AddValue("ofdmaRr", "NrMacSchedulerOfdmaRR as nr-v2x-edge (else the default)", ofdmaRr);
     cmd.AddValue("attachFacing", "attach to the sector facing each UE (else the closest gNB)", attachFacing);
     cmd.AddValue("simTime", "s", simTime);
@@ -282,8 +286,8 @@ main(int argc, char* argv[])
     if (sectors > 1)
     {
         nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
-        nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
-        nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(256)));
+        nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(hoHysteresis));
+        nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(hoTtt)));
     }
     NetDeviceContainer gnbDevs;
     for (uint32_t s = 0; s < sectors; ++s)

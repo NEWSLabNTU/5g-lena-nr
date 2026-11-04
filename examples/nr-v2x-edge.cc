@@ -340,6 +340,8 @@ main(int argc, char* argv[])
     double gnbDowntilt = 0.0;
     std::string beamformingMethod = "direct";
     uint32_t sectors = 1;
+    double hoHysteresis = 3.0;
+    uint32_t hoTtt = 256;
     std::string simClockTrace = "";
 
     CommandLine cmd(__FILE__);
@@ -358,6 +360,8 @@ main(int argc, char* argv[])
     cmd.AddValue("bandwidth", "Bandwidth in Hz", bandwidth);
     cmd.AddValue("numerology", "NR numerology (0-4)", numerology);
     cmd.AddValue("gnbTxPower", "gNB TX power in dBm", gnbTxPower);
+    cmd.AddValue("hoHysteresis", "With --sectors > 1: A3-RSRP handover hysteresis, dB", hoHysteresis);
+    cmd.AddValue("hoTtt", "With --sectors > 1: A3-RSRP handover time to trigger, ms", hoTtt);
     cmd.AddValue("sectors",
                  "Sectors of the site: co-located gNBs, the first facing --gnbBearing, the others "
                  "turned 360/N degrees each, sharing the carrier, with X2 and A3-RSRP handover",
@@ -575,8 +579,8 @@ main(int argc, char* argv[])
     if (sectors > 1)
     {
         nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
-        nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
-        nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(256)));
+        nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(hoHysteresis));
+        nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(hoTtt)));
     }
     NetDeviceContainer gnbDevs;
     std::vector<double> bearings;
