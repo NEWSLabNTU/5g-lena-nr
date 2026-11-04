@@ -260,6 +260,12 @@ main(int argc, char* argv[])
     double simClockRate = 0.0;
     double stallEvery = 0.0;
     double stallMs = 200.0;
+    uint32_t gnbRows = 4;
+    uint32_t gnbCols = 4;
+    std::string gnbElement = "iso";
+    double gnbBearing = 0.0;
+    double gnbDowntilt = 0.0;
+    std::string beamformingMethod = "direct";
     std::string simClockTrace = "";
 
     CommandLine cmd(__FILE__);
@@ -278,6 +284,17 @@ main(int argc, char* argv[])
     cmd.AddValue("bandwidth", "Bandwidth in Hz", bandwidth);
     cmd.AddValue("numerology", "NR numerology (0-4)", numerology);
     cmd.AddValue("gnbTxPower", "gNB TX power in dBm", gnbTxPower);
+    cmd.AddValue("gnbRows", "gNB panel rows", gnbRows);
+    cmd.AddValue("gnbCols", "gNB panel columns", gnbCols);
+    cmd.AddValue("gnbElement",
+                 "gNB antenna element: iso (isotropic) or 3gpp (TR 38.901's 8 dBi sector element)",
+                 gnbElement);
+    cmd.AddValue("gnbBearing", "gNB panel bearing in degrees, counter-clockwise from +x", gnbBearing);
+    cmd.AddValue("gnbDowntilt", "gNB panel mechanical downtilt in degrees", gnbDowntilt);
+    cmd.AddValue("beamforming",
+                 "Ideal beamforming: direct (towards the line of sight) or cellscan (the best beam of a "
+                 "sweep over the channel, every 100 ms)",
+                 beamformingMethod);
     cmd.AddValue("ueTxPower", "UE TX power in dBm (23: power class 3; ns-3's own default is 2)", ueTxPower);
     cmd.AddValue("simTime", "Simulation time in s", simTime);
     cmd.AddValue("tapUePrefix", "TAP device name prefix for the UEs", tapUePrefix);
@@ -434,13 +451,29 @@ main(int argc, char* argv[])
     }
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
-    nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(4));
-    nrHelper->SetGnbAntennaAttribute("NumColumns", UintegerValue(4));
-    nrHelper->SetGnbAntennaAttribute("AntennaElement", PointerValue(CreateObject<IsotropicAntennaModel>()));
+    // A macro site's panel (TR 38.901 UMa: a planar array of 8 dBi sector elements, one
+    // sector facing the area, tilted down) or the old isotropic one.
+    NS_ABORT_MSG_IF(gnbElement != "iso" && gnbElement != "3gpp", "--gnbElement is iso or 3gpp");
+    nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(gnbRows));
+    nrHelper->SetGnbAntennaAttribute("NumColumns", UintegerValue(gnbCols));
+    if (gnbElement == "3gpp")
+    {
+        nrHelper->SetGnbAntennaAttribute("AntennaElement", PointerValue(CreateObject<ThreeGppAntennaModel>()));
+    }
+    else
+    {
+        nrHelper->SetGnbAntennaAttribute("AntennaElement", PointerValue(CreateObject<IsotropicAntennaModel>()));
+    }
+    nrHelper->SetGnbAntennaAttribute("BearingAngle", DoubleValue(gnbBearing * M_PI / 180.0));
+    nrHelper->SetGnbAntennaAttribute("DowntiltAngle", DoubleValue(gnbDowntilt * M_PI / 180.0));
     nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(1));
     nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(2));
     nrHelper->SetUeAntennaAttribute("AntennaElement", PointerValue(CreateObject<IsotropicAntennaModel>()));
-    beamforming->SetAttribute("BeamformingMethod", TypeIdValue(DirectPathBeamforming::GetTypeId()));
+    NS_ABORT_MSG_IF(beamformingMethod != "direct" && beamformingMethod != "cellscan",
+                    "--beamforming is direct or cellscan");
+    beamforming->SetAttribute("BeamformingMethod",
+                              TypeIdValue(beamformingMethod == "cellscan" ? CellScanBeamforming::GetTypeId()
+                                                                          : DirectPathBeamforming::GetTypeId()));
 
     nrHelper->SetGnbPhyAttribute("TxPower", DoubleValue(gnbTxPower));
     nrHelper->SetGnbPhyAttribute("Numerology", UintegerValue(numerology));
