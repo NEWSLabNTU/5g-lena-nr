@@ -569,9 +569,17 @@ main(int argc, char* argv[])
                 auto spectrum = bwp->GetChannel()->GetPhasedArraySpectrumPropagationLossModel();
                 NS_ABORT_MSG_IF(!spectrum, "no phased-array spectrum model to trace into");
                 spectrum->SetAttribute("ChannelModel", PointerValue(tracedModel));
-                // No receiver listens for gNB-gNB or UE-UE signals: skip them.
-                bwp->GetChannel()->AddSpectrumTransmitFilter(CreateObject<TracedSameKindFilter>());
             }
+        }
+    }
+    // No receiver listens for gNB-gNB or UE-UE signals (synchronized TDD, no sidelink):
+    // skip them on every channel model. With a site's three sectors they were most of
+    // ns-3's work (2.9 times one sector's on the 3GPP channel).
+    for (auto& cc : band.m_cc)
+    {
+        for (auto& bwp : cc->m_bwp)
+        {
+            bwp->GetChannel()->AddSpectrumTransmitFilter(CreateObject<TracedSameKindFilter>());
         }
     }
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
